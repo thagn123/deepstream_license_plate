@@ -1,0 +1,32 @@
+%YAML 1.2
+################################################################################
+# NvDCF tracker - ReID disabled (no TAO model required)
+# Only includes params recognized by this NvDCF version (no warnings)
+################################################################################
+
+BaseConfig:
+  minDetectorConfidence: 0.12
+
+TargetManagement:
+  enableBboxUnClipping: 1
+  maxTargetsPerStream: 150
+  minIouDiff4NewTarget: 0.35
+
+TrajectoryManagement:
+  useUniqueID: 1
+
+DataAssociator:
+  dataAssociatorType: 0
+  associationMatcherType: 0
+  checkClassMatch: 1
+  minMatchingScore4Overall: 0.25
+  minMatchingScore4VisualSimilarity: 0.0
+  matchingScoreWeight4VisualSimilarity: 0.0
+
+VisualTracker:
+  visualTrackerType: 1
+  filterLr: 0.04
+  gaussianSigma: 1.5
+
+ReID:
+  reidType: 0

@@ -1,0 +1,50 @@
+# Output files
+outputs/
+logs/
+*.log
+media_monitor.log
+
+# Web server runtime data
+web_server/uploads/
+web_server/data/
+
+# Compiled shared libraries
+custom_parser/*.so
+
+# Large binary model files
+models/*.onnx
+models/*.engine
+models/*.h264
+models/*.mp4
+
+# Converted TensorRT engines (machine-specific)
+models_converted/
+
+# Videos
+videos/
+
+# Backups
+backups/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# YOLOv5 (submodule with its own git repo)
+yolov5/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Temp files
+*.tmp
+*.swp
+*~

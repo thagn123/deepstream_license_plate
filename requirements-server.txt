@@ -1,0 +1,10 @@
+# Server-side dependencies for LPR event pipeline.
+# Install inside ds90 container:
+#   docker exec -it ds90 bash
+#   pip3 install -r requirements-server.txt
+#
+# Install on host (for media_monitor.py running outside ds90):
+#   pip install -r requirements-server.txt
+
+confluent-kafka>=2.3.0
+minio>=7.2.0

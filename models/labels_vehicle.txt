@@ -1,0 +1,14 @@
+seater_12_16
+bus
+car
+club_cart
+human
+moto
+moto_rider
+shuttle_bus_5_7
+truck
+bike
+cyclist
+shuttle_bus_18
+head
+license_plate

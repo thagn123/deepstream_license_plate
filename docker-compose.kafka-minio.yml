@@ -1,0 +1,74 @@
+# docker-compose.kafka-minio.yml
+# Starts Redpanda (Kafka-compatible) + MinIO for local LPR pipeline testing.
+#
+# Usage:
+#   docker compose -f docker-compose.kafka-minio.yml up -d
+#   docker compose -f docker-compose.kafka-minio.yml down
+#
+# Access:
+#   Kafka broker    : localhost:9092  (also reachable from ds90 via 172.17.0.1:9092)
+#   Redpanda admin  : http://localhost:9644
+#   MinIO API       : http://localhost:9000  (ds90: http://172.17.0.1:9000)
+#   MinIO Console   : http://localhost:9001  login: minioadmin / minioadmin
+#
+# network_mode: host is used so both host processes and Docker containers
+# (ds90 connects via 172.17.0.1) can reach Redpanda and MinIO without extra routing.
+
+services:
+
+  # ── Redpanda (single-node Kafka-compatible broker) ──────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v23.3.18
+    container_name: redpanda
+    network_mode: host
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+      - --kafka-addr 0.0.0.0:9092
+      - --advertise-kafka-addr 172.17.0.1:9092
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    restart: unless-stopped
+
+  # ── MinIO object store ───────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: minio
+    network_mode: host
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  # ── Auto-create lpr-media bucket and set public read ────────────────────────
+  # Runs once after MinIO starts, then exits.
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    network_mode: host
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+        echo '[INIT] Waiting for MinIO...';
+        until mc alias set local http://127.0.0.1:9000 minioadmin minioadmin 2>/dev/null; do
+          sleep 2;
+        done;
+        mc mb --ignore-existing local/lpr-media;
+        mc anonymous set public local/lpr-media;
+        echo '[INIT] MinIO bucket lpr-media is ready (public read).';
+      "
+    restart: "no"
+
+volumes:
+  redpanda_data:
+  minio_data:
