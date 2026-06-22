@@ -7,6 +7,19 @@ set -e
 WORKSPACE_DIR="/home/thagn/projects/deepstream/workspace/last_ds_cp"
 cd "$WORKSPACE_DIR"
 
+# ==============================================================================
+# CẤU HÌNH KẾT NỐI (Dành cho Cách A - Dashboard chạy ở Server khác)
+# ==============================================================================
+# 1. Điền IP Public của máy tính này (máy chạy DeepStream) để Web có thể truy cập ảnh MinIO.
+# (Nếu chỉ test trên 1 máy, giữ nguyên 127.0.0.1)
+EDGE_PUBLIC_IP="192.168.10.80"
+
+# 2. Điền địa chỉ của Web Dashboard từ xa (ví dụ: http://192.168.10.80:8001)
+# (Nếu Web Dashboard chạy cùng trên máy này, giữ nguyên http://localhost:8001)
+REMOTE_DASHBOARD_HOST="http://localhost:8001"
+# ==============================================================================
+
+
 echo "====================================================="
 echo "1. Khởi động Hạ tầng (Kafka, Redpanda, MinIO)..."
 echo "====================================================="
@@ -16,17 +29,17 @@ echo ""
 echo "====================================================="
 echo "2. Khởi động Web Server Dashboard..."
 echo "====================================================="
-cd "$WORKSPACE_DIR/web_server"
+cd "$WORKSPACE_DIR/web_server_kafka"
 docker compose up --build -d
 
 echo ""
 echo "====================================================="
 echo "3. Khởi chạy Script Forwarder (JSONL -> Web) (chạy ngầm)..."
 echo "====================================================="
-cd "$WORKSPACE_DIR/web_server"
-nohup python3 forward_jsonl_to_web.py \
-    --events-jsonl /home/thagn/projects/deepstream/outputs/events/events.jsonl \
-    --path-map "/outputs=/home/thagn/projects/deepstream/outputs" > forwarder.log 2>&1 &
+cd "$WORKSPACE_DIR/web_server_kafka"
+source ../.venv/bin/activate 2>/dev/null || true
+export WEB_API_URL="${REMOTE_DASHBOARD_HOST}/api/upload_json"
+nohup python3 kafka_consumer.py > consumer.log 2>&1 &
 FORWARDER_PID=$!
 
 echo ""
@@ -36,7 +49,11 @@ echo "====================================================="
 cd "$WORKSPACE_DIR"
 # Đảm bảo quyền ghi vào thư mục events
 sudo chmod o+w /home/thagn/projects/deepstream/outputs/events/ || true
-nohup ./scripts/run_media_monitor_minio.sh > media_monitor.log 2>&1 &
+sudo rm -f /home/thagn/projects/deepstream/outputs/events/events.jsonl || true
+sudo rm -f media_results.jsonl || true
+export MINIO_ENDPOINT="${EDGE_PUBLIC_IP}:9000"
+export EVENTS_JSONL="/home/thagn/projects/deepstream/outputs/events/events.jsonl"
+nohup ./scripts/run_media_monitor_minio_kafka.sh > media_monitor.log 2>&1 &
 MONITOR_PID=$!
 
 echo ""
@@ -54,14 +71,15 @@ trap "echo -e '\n[INFO] Đang đóng hệ thống...'; kill $FORWARDER_PID $MONI
 echo "[INFO] Đảm bảo NVIDIA Xorg :2 đang chạy bên trong container..."
 docker exec ds90 /usr/local/bin/start-nvidia-display.sh
 
-docker exec -w /workspace/last_ds_cp -it ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
-    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_001 \
-    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_002 \
-    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_003 \
-    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_006 \
+docker exec -w /workspace/last_ds_cp ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
+    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_005 \
+    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_007 \
+    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_008 \
+    rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_009 \
     videos/test1.h264 \
     videos/test3.h264 \
-    --output /outputs/test_last_2.mp4 \
+    videos/test4.h264 \
+    --output outputs/test_last_2.mp4 \
     --event-output-dir /outputs/events \
     --event-jsonl /outputs/events/events.jsonl \
     --save-event-frame \
