@@ -1,0 +1,23 @@
+[property]
+gpu-id=0
+# lpr_ocr.20240305.onnx — 37-class CTC (blank=0, _ = 2-line separator)
+# Input: BGR float32 [0..255], model normalizes internally with ImageNet mean/std.
+# net-scale-factor=1.0 means DeepStream passes raw pixel values to the model.
+onnx-file=/workspace/last_ds_cp/models/lpr_ocr.20240305.onnx
+model-engine-file=/workspace/last_ds_cp/models/lpr_ocr.20240305.onnx_b8_gpu0_fp16.engine
+net-scale-factor=1.0
+offsets=0;0;0
+# model-color-format=1 = BGR (matches test results; model normalizes internally)
+model-color-format=1
+
+process-mode=2
+operate-on-gie-id=1
+operate-on-class-ids=13
+gie-unique-id=4
+interval=0
+secondary-reinfer-interval=0
+network-type=100
+output-tensor-meta=1
+infer-dims=3;64;128
+network-mode=2
+batch-size=8

@@ -1,77 +1,53 @@
 #!/bin/bash
-# Script tự động khởi chạy toàn bộ hệ thống LPR (DeepStream + Kafka + MinIO + Web)
-# Tự động hiển thị màn hình và chỉ gửi các sự kiện biển số xe mới lên dashboard.
-
 set -e
 
 WORKSPACE_DIR="/home/thagn/projects/deepstream/workspace/last_ds_cp"
 cd "$WORKSPACE_DIR"
 
-# ==============================================================================
-# CẤU HÌNH KẾT NỐI (Dành cho Cách A - Dashboard chạy ở Server khác)
-# ==============================================================================
-# 1. Điền IP Public của máy tính này (máy chạy DeepStream) để Web có thể truy cập ảnh MinIO.
-# (Nếu chỉ test trên 1 máy, giữ nguyên 127.0.0.1)
-EDGE_PUBLIC_IP="192.168.10.80"
-
-# 2. Điền địa chỉ của Web Dashboard từ xa (ví dụ: http://192.168.10.80:8001)
-# (Nếu Web Dashboard chạy cùng trên máy này, giữ nguyên http://localhost:8001)
+EDGE_PUBLIC_IP="192.168.1.18"
 REMOTE_DASHBOARD_HOST="http://localhost:8001"
-# ==============================================================================
 
-
-echo "====================================================="
-echo "1. Khởi động Hạ tầng (Kafka, Redpanda, MinIO)..."
-echo "====================================================="
+echo "[1/5] Hạ tầng (Kafka, MinIO)..."
 docker compose -f docker-compose.kafka-minio.yml up -d
 
-echo ""
-echo "====================================================="
-echo "2. Khởi động Web Server Dashboard..."
-echo "====================================================="
+echo "[2/5] Web Server Dashboard..."
 cd "$WORKSPACE_DIR/web_server_kafka"
 docker compose up --build -d
 
-echo ""
-echo "====================================================="
-echo "3. Khởi chạy Script Forwarder (JSONL -> Web) (chạy ngầm)..."
-echo "====================================================="
-cd "$WORKSPACE_DIR/web_server_kafka"
+echo "[3/5] Forwarder (JSONL → Web)..."
 source ../.venv/bin/activate 2>/dev/null || true
 export WEB_API_URL="${REMOTE_DASHBOARD_HOST}/api/upload_json"
 nohup python3 kafka_consumer.py > consumer.log 2>&1 &
 FORWARDER_PID=$!
 
-echo ""
-echo "====================================================="
-echo "4. Khởi chạy Media Monitor (MinIO & Kafka) (chạy ngầm)..."
-echo "====================================================="
+echo "[4/5] Media Monitor (MinIO & Kafka)..."
 cd "$WORKSPACE_DIR"
-# Đảm bảo quyền ghi vào thư mục events
 sudo chmod o+w /home/thagn/projects/deepstream/outputs/events/ || true
 sudo rm -f /home/thagn/projects/deepstream/outputs/events/events.jsonl || true
-sudo rm -f media_results.jsonl || true
+sudo rm -f media_results.jsonl outputs/test_last_2.mp4 || true
 export MINIO_ENDPOINT="${EDGE_PUBLIC_IP}:9000"
 export EVENTS_JSONL="/home/thagn/projects/deepstream/outputs/events/events.jsonl"
 nohup ./scripts/run_media_monitor_minio_kafka.sh > media_monitor.log 2>&1 &
 MONITOR_PID=$!
 
-echo ""
-echo "====================================================="
-echo "5. Khởi chạy DeepStream Pipeline (Hiển thị GUI trực tiếp)..."
-echo "====================================================="
-echo "Nhấn Ctrl+C ở terminal này để dừng toàn bộ hệ thống."
+echo "[5/5] DeepStream Pipeline... (Ctrl+C để dừng)"
 
-# Cài đặt trap để khi bạn nhấn Ctrl+C, script sẽ tự động kill các tiến trình ngầm
-trap "echo -e '\n[INFO] Đang đóng hệ thống...'; kill $FORWARDER_PID $MONITOR_PID 2>/dev/null; exit 0" SIGINT SIGTERM
-
-# Khởi động NVIDIA Xorg :2 bên trong container nếu chưa chạy.
-# nveglglessink yêu cầu NVIDIA EGL qua DRI2 — chỉ có NVIDIA Xorg mới cung cấp DRI2.
-# XWayland chỉ hỗ trợ DRI3 (không tương thích với NVIDIA EGL).
-echo "[INFO] Đảm bảo NVIDIA Xorg :2 đang chạy bên trong container..."
+# nveglglessink cần NVIDIA EGL qua DRI2 — phải dùng NVIDIA Xorg :2, không dùng XWayland
+docker exec ds90 bash -c "
+    if [ -e /tmp/.X2-lock ]; then
+        XPID=\$(cat /tmp/.X2-lock | tr -d ' ' | tr -d '\n')
+        if ! kill -0 \$XPID 2>/dev/null; then
+            rm -f /tmp/.X2-lock /tmp/.X11-unix/X2
+        fi
+    fi
+"
 docker exec ds90 /usr/local/bin/start-nvidia-display.sh
+docker exec ds90 rm -rf /tmp/ds_lpr_v2_runtime_configs
 
-docker exec -w /workspace/last_ds_cp ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
+docker exec -w /workspace/last_ds_cp ds90 \
+    env DISPLAY=:2 \
+        GST_REGISTRY=/workspace/.gst_registry.bin \
+    python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_005 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_007 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_008 \
@@ -86,7 +62,6 @@ docker exec -w /workspace/last_ds_cp ds90 env DISPLAY=:2 python3 /workspace/last
     --min-stable-votes 2 \
     --pgie-interval 0
 
-# Khi DeepStream chạy xong tự nhiên (không bấm Ctrl+C)
-echo "[INFO] Đang đóng hệ thống..."
+echo "[INFO] Đóng hệ thống..."
 kill $FORWARDER_PID $MONITOR_PID 2>/dev/null || true
 echo "[INFO] Hoàn tất."

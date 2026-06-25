@@ -38,14 +38,15 @@ KAFKA_MEDIA_TOPIC="${KAFKA_MEDIA_TOPIC:-lpr.media.v1}"
 
 EVENT_DIR="${EVENT_DIR:-outputs/events}"
 EVENTS_JSONL="${EVENTS_JSONL:-${EVENT_DIR}/events.jsonl}"
-OUTPUT_JSONL="${OUTPUT_JSONL:-${EVENT_DIR}/media_results.jsonl}"
+OUTPUT_JSONL="${OUTPUT_JSONL:-media_results.jsonl}"
 
 # Container path → host path mapping so the monitor can open crop images.
 # The DeepStream app saves paths as /workspace/${WORKSPACE_NAME}/outputs/...
 # Adjust HOST_WORKSPACE if your local checkout is in a different location.
 HOST_WORKSPACE="${HOST_WORKSPACE:-$(pwd)}"
 WORKSPACE_NAME="$(basename "$(pwd)")"
-PATH_MAP="/workspace/${WORKSPACE_NAME}=${HOST_WORKSPACE}"
+PATH_MAP1="/workspace/${WORKSPACE_NAME}=${HOST_WORKSPACE}"
+PATH_MAP2="/outputs=/home/thagn/projects/deepstream/outputs"
 
 ONCE_FLAG=()
 if [ "${ONCE:-0}" = "1" ]; then
@@ -58,20 +59,21 @@ echo " MinIO  : http://$MINIO_ENDPOINT  bucket=$MINIO_BUCKET  prefix=$MINIO_PREF
 echo " Kafka  : $KAFKA_BOOTSTRAP → $KAFKA_MEDIA_TOPIC"
 echo " Events : $EVENTS_JSONL"
 echo " Output : $OUTPUT_JSONL"
-echo " PathMap: $PATH_MAP"
+echo " PathMap: $PATH_MAP1, $PATH_MAP2"
 echo "============================================================"
 
-python3 tools/media_monitor.py \
+source .venv/bin/activate 2>/dev/null || true
+python3 tools/media_monitor_kafka.py \
     --events-jsonl  "$EVENTS_JSONL" \
     --output-jsonl  "$OUTPUT_JSONL" \
-    --replay \ 
     --minio-enable \
     --minio-endpoint   "$MINIO_ENDPOINT" \
     --minio-access-key "$MINIO_ACCESS_KEY" \
     --minio-secret-key "$MINIO_SECRET_KEY" \
     --minio-bucket  "$MINIO_BUCKET" \
     --minio-prefix  "$MINIO_PREFIX" \
-    --path-map      "$PATH_MAP" \
+    --path-map      "$PATH_MAP1" \
+    --path-map      "$PATH_MAP2" \
     --media-result-kafka-enable \
     --media-result-kafka-bootstrap "$KAFKA_BOOTSTRAP" \
     --media-result-kafka-topic     "$KAFKA_MEDIA_TOPIC" \

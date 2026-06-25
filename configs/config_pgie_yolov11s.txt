@@ -1,9 +1,9 @@
 [property]
 gpu-id=0
 
-onnx-file=/workspace/last_ds_cp/models_converted/yolov11s_14_cls_20241224/model.onnx
-model-engine-file=/workspace/last_ds_cp/models_converted/yolov11s_14_cls_20241224/model.onnx_b12_gpu0_fp16.engine
-labelfile-path=/workspace/last_ds_cp/models_converted/yolov11s_14_cls_20241224/labels.txt
+onnx-file=/workspace/last_ds_cp/models/yolov11s_14_cls_20241224.onnx
+model-engine-file=/workspace/last_ds_cp/models/yolov11s_14_cls_20241224.onnx_b12_gpu0_fp16.engine
+labelfile-path=/workspace/last_ds_cp/models/labels_vehicle.txt
 
 batch-size=1
 network-mode=2

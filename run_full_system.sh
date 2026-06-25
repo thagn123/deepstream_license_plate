@@ -54,7 +54,7 @@ trap "echo -e '\n[INFO] Đang đóng hệ thống...'; kill $FORWARDER_PID $MONI
 echo "[INFO] Đảm bảo NVIDIA Xorg :2 đang chạy bên trong container..."
 docker exec ds90 /usr/local/bin/start-nvidia-display.sh
 
-docker exec -w /workspace/last_ds_cp -it ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
+docker exec -w /workspace/last_ds_cp -it ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2_new_ocr.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_001 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_002 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_003 \

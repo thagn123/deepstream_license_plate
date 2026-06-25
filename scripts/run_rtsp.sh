@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Starts/reuses MediaMTX on host when run from host, or publishes to an
-# already-running host RTSP server when run inside ds90.
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
@@ -100,10 +97,11 @@ if [ -n "$FIRST_MP4" ]; then
     echo ""
     WORKSPACE_NAME="$(basename "$(pwd)")"
     echo "[INFO] Example DeepStream command:"
-    echo "  docker exec -w /workspace/${WORKSPACE_NAME} ds90 python3 src/app_lpr_v2.py \\"
+    echo "  docker exec -w /workspace/${WORKSPACE_NAME} ds90 \\"
+    echo "    env DISPLAY=:2 GST_REGISTRY=/workspace/.gst_registry.bin \\"
+    echo "    python3 src/app_lpr_v2.py \\"
     echo "    ${RTSP_READ_HOST}/${DIR_NAME}/${FIRST_NAME_SAFE} \\"
-    echo "    --no-display --pgie-interval 0 --min-stable-votes 2 \\"
-    echo "    --square-split-overlap 0.18 --square-split-pad-x 0.16 --square-split-pad-y 0.12"
+    echo "    --pgie-interval 0 --min-stable-votes 2"
     echo ""
 fi
 

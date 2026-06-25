@@ -1,0 +1,18 @@
+services:
+  web_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: edge_event_monitor_kafka
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - DATABASE_URL=sqlite:////app/data/events.db
+      - UPLOAD_DIR=/app/uploads
+      - API_KEY_WHITELIST=Jetson-Xavier-NX-01=secret_key_nx_01,Jetson-Orin-02=secret_key_orin_02
+      - RETENTION_DAYS=7
+      - HEARTBEAT_TIMEOUT_SECONDS=60
+    restart: unless-stopped
