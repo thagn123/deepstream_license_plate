@@ -273,11 +273,16 @@ def run(args, *, probe_overrides=None, ocr_backend=None):
     # ── Streammux ─────────────────────────────────────────────────────────────
     streammux = _make_el("nvstreammux", "streammux")
     pipeline.add(streammux)
-    streammux.set_property("width",  config.MUXER_WIDTH)
-    streammux.set_property("height", config.MUXER_HEIGHT)
+    try:
+        streammux.set_property("width",  config.MUXER_WIDTH)
+        streammux.set_property("height", config.MUXER_HEIGHT)
+        streammux.set_property("batched-push-timeout", config.MUXER_BATCH_TIMEOUT_USEC)
+        streammux.set_property("live-source", 1 if is_live else 0)
+    except TypeError:
+        # New NvStreamMux (DS 6.2+) không còn dùng các thuộc tính này trực tiếp
+        pass
+        
     streammux.set_property("batch-size", num_sources)
-    streammux.set_property("batched-push-timeout", config.MUXER_BATCH_TIMEOUT_USEC)
-    streammux.set_property("live-source", 1 if is_live else 0)
 
     # ── Sources ───────────────────────────────────────────────────────────────
     for i, uri in enumerate(uris):

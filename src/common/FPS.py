@@ -47,6 +47,14 @@ class GETFPS:
         self.start_time = end_time
         return round(stream_fps, 2)
 
+    def get_current_fps(self):
+        end_time = time.time()
+        elapsed = end_time - self.start_time
+        if elapsed < 0.5:
+            return 30.0  # Mặc định HQ trong 0.5 giây đầu tiên
+        with fps_mutex:
+            return float(self.frame_count / elapsed)
+
     def print_data(self):
         print('frame_count=',self.frame_count)
         print('start_time=',self.start_time)
@@ -65,3 +73,8 @@ class PERF_DATA:
     
     def update_fps(self, stream_index):
         self.all_stream_fps[stream_index].update_fps()
+
+    def get_current_fps(self, stream_index):
+        if stream_index in self.all_stream_fps:
+            return self.all_stream_fps[stream_index].get_current_fps()
+        return 30.0

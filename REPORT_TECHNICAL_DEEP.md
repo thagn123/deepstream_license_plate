@@ -571,7 +571,43 @@ else:
     vs.vehicle_bbox = EMA(vs.vehicle_bbox, raw_v_bbox, alpha=0.4)  # smoothing
 ```
 
-### 11.3 Thu thập OCR text từ plate-parts (biển vuông)
+### 11.3 Đánh Giá Chất Lượng Nguồn & Lọc Động (Dynamic Quality Routing)
+
+Hệ thống triển khai cơ chế tự động đánh giá chất lượng video thời gian thực dựa trên 2 yếu tố: Độ phân giải luồng (Spatial) và Tốc độ khung hình (Temporal - FPS). Nếu nguồn thuộc dạng chất lượng thấp (LQ), hệ thống sẽ linh hoạt nới lỏng ngưỡng nhận diện YOLO và màng lọc Laplacian để tăng tối đa tỷ lệ bắt mờ.
+
+```python
+# ── Source Quality Assessment ─────────────────────────────────────────
+sid_str = f"stream{frame_meta.source_id}"
+stream_fps = lpr_state.perf_data.get_current_fps(sid_str)
+source_uri = lpr_state.source_uri_by_id.get(frame_meta.source_id, "")
+
+is_low_quality_source = False
+# Ép RTSP thành LQ trong lúc test (nếu cần), hoặc tự động đánh giá qua độ phân giải & FPS
+is_forced_lq = config.FORCE_LQ_RTSP and "rtsp://" in source_uri
+
+if is_forced_lq or (0 < frame_meta.source_frame_width < 1280) or (0 < frame_meta.source_frame_height < 720) or (0 < stream_fps < 15):
+    is_low_quality_source = True
+
+for p in plates:
+    is_low_quality = is_low_quality_source
+
+    # Lọc Confidence động
+    target_conf = 0.15 if is_low_quality else 0.25
+    if p.confidence > 0.0 and p.confidence < target_conf:
+        continue
+
+    # Lọc Laplacian động
+    if not getattr(lpr_state, 'disable_laplacian', False):
+        lap_score = int(p.misc_obj_info[0])
+        target_lap = 50 if is_low_quality else 150
+        if lap_score < target_lap and lap_score > 0:
+            continue
+```
+* Ý nghĩa:
+  * Camera nét (High Quality): Siết chặt YOLO Conf >= 0.25 và Laplacian >= 150 để OCR xử lý mượt mà, tránh rác.
+  * Camera mờ (Low Quality): Hạ chuẩn YOLO Conf >= 0.15 và Laplacian >= 50, tận dụng đối đa recall để không bỏ sót sự kiện.
+
+### 11.4 Thu thập OCR text từ plate-parts (biển vuông)
 
 ```python
 for part in plate_parts:

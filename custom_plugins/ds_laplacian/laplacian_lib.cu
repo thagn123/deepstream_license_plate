@@ -144,7 +144,6 @@ extern "C" double gpu_warp_equalize_blur_laplacian(void* d_in_data, int pitch, i
     dim3 blockSize(16, 16);
     dim3 gridSize((out_w + blockSize.x - 1) / blockSize.x, (out_h + blockSize.y - 1) / blockSize.y);
 
-    printf("Minv: %f %f %f | %f %f %f | %f %f %f\n", Minv[0], Minv[1], Minv[2], Minv[3], Minv[4], Minv[5], Minv[6], Minv[7], Minv[8]);
     warp_and_minmax_kernel<<<gridSize, blockSize, 0, stream>>>((unsigned char*)d_in_data, pitch, start_x, start_y, crop_w, crop_h, d_m, d_warped, out_w, out_h, d_min, d_max);
 
     int h_min, h_max;
@@ -166,8 +165,7 @@ extern "C" double gpu_warp_equalize_blur_laplacian(void* d_in_data, int pitch, i
     cudaFree(d_min); cudaFree(d_max);
     cudaFree(d_sum); cudaFree(d_sq_sum); cudaFree(d_count);
 
-    if (h_count == 0) { printf("GPU Laplacian h_count is 0!\n"); return 0.0; }
-    printf("GPU Laplacian success: h_min=%d, h_max=%d, h_count=%d, sum=%f, sq_sum=%f\n", h_min, h_max, h_count, h_sum, h_sq_sum);
+    if (h_count == 0) { return 0.0; }
     double mean = h_sum / h_count;
     double variance = (h_sq_sum / h_count) - (mean * mean);
     return variance;

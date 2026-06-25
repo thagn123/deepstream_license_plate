@@ -17,8 +17,8 @@ def _parse_args(args):
     min_plate_conf = 0.05
     min_plate_width = 20
     min_plate_height = 6
-    min_vehicle_width = 60
-    min_vehicle_height = 40
+    min_vehicle_width = 50
+    min_vehicle_height = 30
     min_vehicle_width_ratio = 0.0
     min_vehicle_height_ratio = 0.0
     bbox_smooth_alpha = 0.4

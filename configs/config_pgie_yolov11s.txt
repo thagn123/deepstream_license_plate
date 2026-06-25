@@ -25,11 +25,13 @@ custom-lib-path=/workspace/last_ds_cp/custom_parser/libnvds_infercustom_yolov11_
 parse-bbox-func-name=NvDsInferParseCustomYoloV11Flat
 
 cluster-mode=2
-pre-cluster-threshold=0.25
+pre-cluster-threshold=0.15
+#pre-cluster-threshold=0.25
 nms-iou-threshold=0.45
 topk=300
 
 [class-attrs-all]
-pre-cluster-threshold=0.25
+pre-cluster-threshold=0.15
+#pre-cluster-threshold=0.25
 nms-iou-threshold=0.45
 topk=300

@@ -1,6 +1,8 @@
 import os
 import cv2
 import pyds
+import json
+import time
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
@@ -104,19 +106,37 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
                     vs.vehicle_bbox = _smooth_bbox(vs.vehicle_bbox, raw_v_bbox, lpr_state.bbox_smooth_alpha)
             vs.last_bbox_update_frame = frame_num
 
+        # ── Source Quality Assessment ─────────────────────────────────────────
+        sid_str = f"stream{frame_meta.source_id}"
+        stream_fps = lpr_state.perf_data.get_current_fps(sid_str)
+        source_uri = lpr_state.source_uri_by_id.get(frame_meta.source_id, "")
+        
+        is_low_quality_source = False
+        is_forced_lq = config.FORCE_LQ_RTSP and "rtsp://" in source_uri
+        
+        if is_forced_lq or (0 < frame_meta.source_frame_width < 1280) or (0 < frame_meta.source_frame_height < 720) or (0 < stream_fps < 15):
+            is_low_quality_source = True
+
         # ── Process plates ────────────────────────────────────────────────────
         frame_best_plates = {}
         frame_plate_seen = {}
         for p in plates:
-            if p.confidence > 0.0 and p.confidence < lpr_state.min_plate_conf:
+            # Chỉ dùng đánh giá chất lượng của cả luồng video
+            is_low_quality = is_low_quality_source
+
+            # Dynamic Confidence Filter
+            target_conf = 0.15 if is_low_quality else 0.25
+            if p.confidence > 0.0 and p.confidence < target_conf:
                 continue
+
             if p.rect_params.width < lpr_state.min_plate_width or p.rect_params.height < lpr_state.min_plate_height:
                 continue
 
-            # Laplacian Filter
+            # Dynamic Laplacian Filter
             if not getattr(lpr_state, 'disable_laplacian', False):
                 lap_score = int(p.misc_obj_info[0])
-                if lap_score < 150 and lap_score > 0:
+                target_lap = 50 if is_low_quality else 150
+                if lap_score < target_lap and lap_score > 0:
                     continue
             lpr_state.metrics["plate_objects"] += 1
 
@@ -132,6 +152,13 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
                 assoc_score = 0.0
 
             track_key = (sid, vid)
+            
+            if vid == 434:
+                crop_img = _crop_plate_from_frame(frame_image, p.rect_params)
+                if crop_img is not None:
+                    os.makedirs("outputs/debug_434", exist_ok=True)
+                    cv2.imwrite(f"outputs/debug_434/plate_434_frame_{frame_num}.jpg", crop_img)
+
             _p_area = p.rect_params.width * p.rect_params.height
             if track_key not in frame_plate_seen or _p_area > frame_plate_seen[track_key][1]:
                 frame_plate_seen[track_key] = (p, _p_area)

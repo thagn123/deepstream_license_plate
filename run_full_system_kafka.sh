@@ -32,20 +32,16 @@ MONITOR_PID=$!
 
 echo "[5/5] DeepStream Pipeline... (Ctrl+C để dừng)"
 
-# nveglglessink cần NVIDIA EGL qua DRI2 — phải dùng NVIDIA Xorg :2, không dùng XWayland
-docker exec ds90 bash -c "
-    if [ -e /tmp/.X2-lock ]; then
-        XPID=\$(cat /tmp/.X2-lock | tr -d ' ' | tr -d '\n')
-        if ! kill -0 \$XPID 2>/dev/null; then
-            rm -f /tmp/.X2-lock /tmp/.X11-unix/X2
-        fi
-    fi
-"
-docker exec ds90 /usr/local/bin/start-nvidia-display.sh
+# Cho phép container kết nối X11 host (XWayland :0 → màn hình AMD)
+xhost +local: 2>/dev/null || true
+
 docker exec ds90 rm -rf /tmp/ds_lpr_v2_runtime_configs
 
+# USE_XIMAGESINK=1: dùng ximagesink thay nveglglessink để hiển thị qua XWayland trên màn hình AMD
+# DISPLAY=:0: kết nối vào XWayland của host (màn hình vật lý)
 docker exec -w /workspace/last_ds_cp ds90 \
-    env DISPLAY=:2 \
+    env DISPLAY=:0 \
+        USE_XIMAGESINK=1 \
         GST_REGISTRY=/workspace/.gst_registry.bin \
     python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_005 \
@@ -58,6 +54,8 @@ docker exec -w /workspace/last_ds_cp ds90 \
     --output outputs/test_last_2.mp4 \
     --event-output-dir /outputs/events \
     --event-jsonl /outputs/events/events.jsonl \
+    --min-plate-width 12 \
+    --min-plate-height 4 \
     --save-event-frame \
     --min-stable-votes 2 \
     --pgie-interval 0

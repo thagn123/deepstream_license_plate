@@ -4,4 +4,4 @@ tracker-height=384
 gpu-id=0
 
 ll-lib-file=/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
-ll-config-file=/workspace/ds_lpr_v2/configs/config_tracker_NvDCF_noReid.yml
+ll-config-file=/workspace/last_ds_cp/configs/config_tracker_NvDCF_noReid.yml

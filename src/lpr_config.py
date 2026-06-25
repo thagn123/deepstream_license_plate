@@ -1,6 +1,10 @@
 import os
 import re
 
+# Cho phép ép các luồng RTSP thành chất lượng thấp (LQ) dùng cho mục đích Testing (do lỗi ffmpeg phát sai FPS). 
+# Nếu cắm Camera thật, hãy đổi thành False.
+FORCE_LQ_RTSP = True
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── Config paths ──────────────────────────────────────────────────────────────
@@ -9,7 +13,7 @@ TRACKER_CONFIG_PATH = os.path.join(PROJECT_ROOT, "configs", "ds_tracker_config.t
 SGIE3_CONFIG_PATH   = os.path.join(PROJECT_ROOT, "configs", "config_sgie_lpr_ocr_2024.txt")
 RUNTIME_CONFIG_DIR  = os.path.join("/tmp", "ds_lpr_v2_runtime_configs")
 
-MUXER_BATCH_TIMEOUT_USEC = 33000
+MUXER_BATCH_TIMEOUT_USEC = 16666
 MUXER_WIDTH = 1920
 MUXER_HEIGHT = 1080
 TILER_WIDTH = 1280

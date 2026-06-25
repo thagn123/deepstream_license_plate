@@ -269,8 +269,6 @@ gst_laplacian_transform_ip (GstBaseTransform * btrans, GstBuffer * inbuf)
 
           // 3. Xử lý các phép toán nặng trên GPU
           double variance = gpu_warp_equalize_blur_laplacian(d_y_plane, pitch, crop_x, crop_y, crop_w, crop_h, Minv_ptr, out_w, out_h, 0);
-          static int p_cnt = 0;
-          if(p_cnt++ < 10) printf("C++ Variance: %f\n", variance);
           
 obj_meta->misc_obj_info[0] = (int)variance;
       }
