@@ -5,6 +5,7 @@
 # ==============================================================================
 # HƯỚNG DẪN TRUY CẬP HỆ THỐNG (HOST PORTS)
 # - Web Dashboard (LPR Event): http://localhost:8001
+#   -> Xem trên điện thoại (cùng Wifi): http://192.168.10.33:8001
 # - MinIO S3 API            : http://localhost:9000
 # - MinIO S3 Console        : http://localhost:9001 (User/Pass: minioadmin / minioadmin)
 # - Redpanda (Kafka Broker) : localhost:9092
@@ -25,14 +26,14 @@ echo ""
 echo "====================================================="
 echo "2. Khởi động Web Server Dashboard..."
 echo "====================================================="
-cd "$WORKSPACE_DIR/web_server"
+cd "$WORKSPACE_DIR/web_server_kafka"
 docker compose up --build -d
 
 echo ""
 echo "====================================================="
 echo "3. Khởi chạy Script Forwarder (JSONL -> Web) (chạy ngầm)..."
 echo "====================================================="
-cd "$WORKSPACE_DIR/web_server"
+cd "$WORKSPACE_DIR/web_server_kafka"
 nohup python3 forward_jsonl_to_web.py \
     --events-jsonl /home/thagn/projects/deepstream/outputs/events/events.jsonl \
     --path-map "/outputs=/home/thagn/projects/deepstream/outputs" > forwarder.log 2>&1 &
@@ -63,7 +64,7 @@ trap "echo -e '\n[INFO] Đang đóng hệ thống...'; kill $FORWARDER_PID $MONI
 echo "[INFO] Đảm bảo NVIDIA Xorg :2 đang chạy bên trong container..."
 docker exec ds90 /usr/local/bin/start-nvidia-display.sh
 
-docker exec -w /workspace/last_ds_cp -it ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2_new_ocr.py \
+docker exec -w /workspace/last_ds_cp ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_001 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_002 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_003 \
