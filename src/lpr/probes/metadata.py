@@ -238,8 +238,8 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
                 vs.display_plate_score = b['score']
                 vs.ocr_confidence = b['conf']
 
-            stable_text = _stable_plate(track_key, b['text'], b['conf'], p.rect_params.width, p.rect_params.height, b['assoc_score'])
-            stable_votes, stable_score = _plate_history_stats(track_key, stable_text) if stable_text else (0, 0.0)
+            stable_text = _stable_plate(track_key, b['text'], b['conf'], p.rect_params.width, p.rect_params.height, b['assoc_score'], is_moto=is_moto)
+            stable_votes, stable_score = _plate_history_stats(track_key, stable_text, is_moto=is_moto) if stable_text else (0, 0.0)
 
             if b['score'] > vs.best_score:
                 vs.best_plate_object_id = p.object_id

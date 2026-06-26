@@ -88,7 +88,7 @@ def _square_join_variants(top: str, bot: str) -> list:
 
 
 def _correct_vn_plate(raw: str, is_moto: bool = False) -> str:
-    # ── Motorcycle Plate Correction (2-line & CTC Collapse) ───────────────────
+    # ── Motorcycle & Car Plate Correction (2-line & CTC Collapse) ─────────────
     # If raw has a hyphen (representing a 2-line plate), e.g. "89B0-712"
     if "-" in raw:
         parts = raw.split("-")
@@ -97,11 +97,11 @@ def _correct_vn_plate(raw: str, is_moto: bool = False) -> str:
             bot = re.sub(r'[^A-Z0-9]', '', parts[1].upper())
             
             # Case 1: top is 2 digits + 1 letter + 1 digit (e.g. 89B0)
-            # and bot is exactly 3 digits (e.g. 712) -> suffix missing a leading 0
+            # and bot is exactly 3 digits (e.g. 712) -> suffix missing a digit (likely matching the series digit)
             if (len(top) == 4 and len(bot) == 3 
                     and top[:2].isdigit() and top[2].isalpha() and top[3].isdigit()
                     and bot.isdigit()):
-                raw = f"{top}-0{bot}"
+                raw = f"{top}-{top[3]}{bot}"
             
             # Case 2: top is 2 digits + 1 letter (e.g. 89B) and bot is 4 digits starting with 0 (e.g. 0712)
             # If it's a motorcycle, it must have a series digit. The leading 0 in bot is likely the series digit.
@@ -112,10 +112,22 @@ def _correct_vn_plate(raw: str, is_moto: bool = False) -> str:
     if not text:
         return ""
 
-    # If it's a 1-line plate of length 7 and we know it's a motorcycle (e.g. "89B0712")
-    if is_moto and len(text) == 7:
-        if text[:2].isdigit() and text[2].isalpha() and text[3].isdigit() and text[4:].isdigit():
+    # If it's a 1-line plate of length 7
+    if len(text) == 7:
+        # Rule A: If we know it's a motorcycle (starts with 2 digits + 1 letter + 1 digit (d) + 3 digits)
+        # We restore the collapsed series digit d into the suffix.
+        if is_moto and text[:2].isdigit() and text[2].isalpha() and text[3].isdigit() and text[4:].isdigit():
+            text = text[:4] + text[3] + text[4:]
+        
+        # Rule B: For cars or general case (starts with 2 digits + 1 letter + "0" + 3 digits)
+        # E.g. "89B0712" -> "89B00712" (car 89B-007.12)
+        elif text[:2].isdigit() and text[2].isalpha() and text[3] == "0" and text[4:].isdigit():
             text = text[:4] + "0" + text[4:]
+
+    # Rule C: 2-letter series car plate (e.g. "29LD0123" -> "29LD00123")
+    elif len(text) == 8:
+        if text[:2].isdigit() and text[2:4].isalpha() and text[4] == "0" and text[5:].isdigit():
+            text = text[:5] + "0" + text[5:]
 
     variants = [text]
     for series_len in (1, 2):
@@ -206,11 +218,11 @@ def _should_replace_stable_text(current_text: str, current_score: float, current
     return enough_votes or clearly_better_shape or clearly_better_score
 
 
-def _is_valid_vn_plate_early(text: str) -> bool:
-    return _plate_pattern_score(_correct_vn_plate(text)) > 0.0
+def _is_valid_vn_plate_early(text: str, is_moto: bool = False) -> bool:
+    return _plate_pattern_score(_correct_vn_plate(text, is_moto=is_moto)) > 0.0
 
 
-def _stable_plate(track_key, raw_text: str, conf: float, width: int, height: int, assoc_score: float) -> str:
+def _stable_plate(track_key, raw_text: str, conf: float, width: int, height: int, assoc_score: float, is_moto: bool = False) -> str:
     if track_key not in state.plate_history:
         state.plate_history[track_key] = []
 
@@ -221,8 +233,8 @@ def _stable_plate(track_key, raw_text: str, conf: float, width: int, height: int
         state.plate_history[track_key] = hist
 
     if raw_text:
-        norm = _correct_vn_plate(raw_text)
-        score = _plate_quality_score(norm, conf, width, height, assoc_score)
+        norm = _correct_vn_plate(raw_text, is_moto=is_moto)
+        score = _plate_quality_score(norm, conf, width, height, assoc_score, is_moto=is_moto)
         if score > 0:
             hist.append({"text": norm, "score": score})
 
@@ -271,8 +283,8 @@ def _stable_plate(track_key, raw_text: str, conf: float, width: int, height: int
     return best_cand
 
 
-def _plate_history_stats(track_key, text: str) -> tuple:
-    text = _correct_vn_plate(text)
+def _plate_history_stats(track_key, text: str, is_moto: bool = False) -> tuple:
+    text = _correct_vn_plate(text, is_moto=is_moto)
     hist = state.plate_history.get(track_key, [])
     votes = 0
     best = 0.0
@@ -283,8 +295,8 @@ def _plate_history_stats(track_key, text: str) -> tuple:
     return votes, best
 
 
-def _normalize_plate_text(raw_text: str) -> str:
-    return _correct_vn_plate(raw_text)
+def _normalize_plate_text(raw_text: str, is_moto: bool = False) -> str:
+    return _correct_vn_plate(raw_text, is_moto=is_moto)
 
 
 def _is_valid_vn_plate(text: str) -> bool:
