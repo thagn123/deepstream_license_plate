@@ -12,7 +12,7 @@ set -e
 WORKSPACE_DIR="/home/thagn/projects/deepstream/workspace/last_ds_cp"
 cd "$WORKSPACE_DIR"
 
-EDGE_PUBLIC_IP="192.168.1.18"
+EDGE_PUBLIC_IP="192.168.10.33"
 REMOTE_DASHBOARD_HOST="http://localhost:8001"
 
 echo "[1/5] Hạ tầng (Kafka, MinIO)..."
@@ -23,9 +23,8 @@ cd "$WORKSPACE_DIR/web_server_kafka"
 docker compose up --build -d
 
 echo "[3/5] Forwarder (JSONL → Web)..."
-source ../.venv/bin/activate 2>/dev/null || true
 export WEB_API_URL="${REMOTE_DASHBOARD_HOST}/api/upload_json"
-nohup python3 kafka_consumer.py > consumer.log 2>&1 &
+nohup ../.venv/bin/python3 -u kafka_consumer.py > consumer.log 2>&1 &
 FORWARDER_PID=$!
 
 echo "[4/5] Media Monitor (MinIO & Kafka)..."

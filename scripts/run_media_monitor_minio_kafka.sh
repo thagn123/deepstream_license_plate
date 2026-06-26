@@ -62,8 +62,7 @@ echo " Output : $OUTPUT_JSONL"
 echo " PathMap: $PATH_MAP1, $PATH_MAP2"
 echo "============================================================"
 
-source .venv/bin/activate 2>/dev/null || true
-python3 tools/media_monitor_kafka.py \
+.venv/bin/python3 -u tools/media_monitor_kafka.py \
     --events-jsonl  "$EVENTS_JSONL" \
     --output-jsonl  "$OUTPUT_JSONL" \
     --minio-enable \
