@@ -45,8 +45,8 @@ def _plate_pattern_score(text: str) -> float:
     return best
 
 
-def _plate_quality_score(text: str, conf: float, width: int, height: int, association_score: float) -> float:
-    text = _correct_vn_plate(text)
+def _plate_quality_score(text: str, conf: float, width: int, height: int, association_score: float, is_moto: bool = False) -> float:
+    text = _correct_vn_plate(text, is_moto=is_moto)
     score = _plate_pattern_score(text)
     if score <= 0.0:
         return 0.0
@@ -87,10 +87,35 @@ def _square_join_variants(top: str, bot: str) -> list:
     return variants
 
 
-def _correct_vn_plate(raw: str) -> str:
+def _correct_vn_plate(raw: str, is_moto: bool = False) -> str:
+    # ── Motorcycle Plate Correction (2-line & CTC Collapse) ───────────────────
+    # If raw has a hyphen (representing a 2-line plate), e.g. "89B0-712"
+    if "-" in raw:
+        parts = raw.split("-")
+        if len(parts) == 2:
+            top = re.sub(r'[^A-Z0-9]', '', parts[0].upper())
+            bot = re.sub(r'[^A-Z0-9]', '', parts[1].upper())
+            
+            # Case 1: top is 2 digits + 1 letter + 1 digit (e.g. 89B0)
+            # and bot is exactly 3 digits (e.g. 712) -> suffix missing a leading 0
+            if (len(top) == 4 and len(bot) == 3 
+                    and top[:2].isdigit() and top[2].isalpha() and top[3].isdigit()
+                    and bot.isdigit()):
+                raw = f"{top}-0{bot}"
+            
+            # Case 2: top is 2 digits + 1 letter (e.g. 89B) and bot is 4 digits starting with 0 (e.g. 0712)
+            # If it's a motorcycle, it must have a series digit. The leading 0 in bot is likely the series digit.
+            elif is_moto and len(top) == 3 and len(bot) == 4 and bot.startswith("0") and bot[1:].isdigit():
+                raw = f"{top}0-{bot}"
+
     text = _normalize_plate_for_output(raw)
     if not text:
         return ""
+
+    # If it's a 1-line plate of length 7 and we know it's a motorcycle (e.g. "89B0712")
+    if is_moto and len(text) == 7:
+        if text[:2].isdigit() and text[2].isalpha() and text[3].isdigit() and text[4:].isdigit():
+            text = text[:4] + "0" + text[4:]
 
     variants = [text]
     for series_len in (1, 2):

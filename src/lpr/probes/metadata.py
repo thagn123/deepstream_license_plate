@@ -164,8 +164,12 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
             if track_key not in frame_plate_seen or _p_area > frame_plate_seen[track_key][1]:
                 frame_plate_seen[track_key] = (p, _p_area)
 
+            is_moto = False
+            if track_key in lpr_state.vehicle_states:
+                is_moto = lpr_state.vehicle_states[track_key].vehicle_class in (5, 6)
+
             full_text, full_conf = _read_lpr_text(p, config.SGIE3_UNIQUE_ID)
-            best_cand_text = _correct_vn_plate(full_text)
+            best_cand_text = _correct_vn_plate(full_text, is_moto=is_moto)
             best_cand_conf = full_conf
 
             if not best_cand_text:
@@ -173,7 +177,8 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
 
             best_cand_score = _plate_quality_score(
                 best_cand_text, best_cand_conf,
-                p.rect_params.width, p.rect_params.height, assoc_score
+                p.rect_params.width, p.rect_params.height, assoc_score,
+                is_moto=is_moto
             )
 
             if lpr_state.debug_jsonl_path:
