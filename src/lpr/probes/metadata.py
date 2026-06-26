@@ -111,11 +111,12 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
         stream_fps = lpr_state.perf_data.get_current_fps(sid_str)
         source_uri = lpr_state.source_uri_by_id.get(frame_meta.source_id, "")
         
-        is_low_quality_source = False
         is_forced_lq = config.FORCE_LQ_RTSP and "rtsp://" in source_uri
-        
-        if is_forced_lq or (0 < frame_meta.source_frame_width < 1280) or (0 < frame_meta.source_frame_height < 720) or (0 < stream_fps < 15):
-            is_low_quality_source = True
+        c1 = is_forced_lq
+        c2 = (0 < frame_meta.source_frame_width < 1280)
+        c3 = (0 < frame_meta.source_frame_height < 720)
+        c4 = (0 < stream_fps < 15)
+        is_low_quality_source = c1 or c2 or c3 or c4
 
         # ── Process plates ────────────────────────────────────────────────────
         frame_best_plates = {}

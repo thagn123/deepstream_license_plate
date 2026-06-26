@@ -82,12 +82,12 @@ def osd_sink_pad_buffer_probe(pad, info, u_data):
                                 break
 
                         display_id = _display_id(obj_sid, best_vid)
-                        sid_str = f"stream{frame_meta.source_id}"
+                        sid_str = f"stream{obj_sid}"
                         stream_fps = lpr_state.perf_data.get_current_fps(sid_str)
-                        source_uri = lpr_state.source_uri_by_id.get(frame_meta.source_id, "")
+                        source_uri = lpr_state.source_uri_by_id.get(obj_sid, "")
                         is_forced_lq = config.FORCE_LQ_RTSP and "rtsp://" in source_uri
                         
-                        is_low_quality = is_forced_lq or (0 < frame_meta.source_frame_width < 1280 or 0 < frame_meta.source_frame_height < 720) or (0 < stream_fps < 15)
+                        is_low_quality = is_forced_lq or (0 < stream_fps < 15)
                         quality_str = "LQ" if is_low_quality else "HQ"
                         
                         display_text = f"Plate: {shown_text} [{quality_str}] #{display_id}" if shown_text else f"Plate [{quality_str}] #{display_id}"

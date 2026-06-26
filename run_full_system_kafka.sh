@@ -37,7 +37,6 @@ xhost +local: 2>/dev/null || true
 
 docker exec ds90 rm -rf /tmp/ds_lpr_v2_runtime_configs
 
-# USE_XIMAGESINK=1: dùng ximagesink thay nveglglessink để hiển thị qua XWayland trên màn hình AMD
 # DISPLAY=:0: kết nối vào XWayland của host (màn hình vật lý)
 docker exec -w /workspace/last_ds_cp ds90 \
     env DISPLAY=:0 \
