@@ -1,4 +1,12 @@
 #!/bin/bash
+# ==============================================================================
+# HƯỚNG DẪN TRUY CẬP HỆ THỐNG (HOST PORTS)
+# - Web Dashboard (LPR Event): http://localhost:8001
+# - MinIO S3 API            : http://localhost:9000
+# - MinIO S3 Console        : http://localhost:9001 (User/Pass: minioadmin / minioadmin)
+# - Redpanda (Kafka Broker) : localhost:9092
+# - RTSP Server (MediaMTX)  : rtsp://localhost:8554
+# ==============================================================================
 set -e
 
 WORKSPACE_DIR="/home/thagn/projects/deepstream/workspace/last_ds_cp"

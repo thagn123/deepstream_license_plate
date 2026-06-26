@@ -1,6 +1,15 @@
 #!/bin/bash
 # Script tự động khởi chạy toàn bộ hệ thống LPR (DeepStream + Kafka + MinIO + Web)
 # Tự động hiển thị màn hình và chỉ gửi các sự kiện biển số xe mới lên dashboard.
+#
+# ==============================================================================
+# HƯỚNG DẪN TRUY CẬP HỆ THỐNG (HOST PORTS)
+# - Web Dashboard (LPR Event): http://localhost:8001
+# - MinIO S3 API            : http://localhost:9000
+# - MinIO S3 Console        : http://localhost:9001 (User/Pass: minioadmin / minioadmin)
+# - Redpanda (Kafka Broker) : localhost:9092
+# - RTSP Server (MediaMTX)  : rtsp://localhost:8554
+# ==============================================================================
 
 set -e
 
