@@ -13,11 +13,22 @@ G_BEGIN_DECLS
 typedef struct _GstLaplacian GstLaplacian;
 typedef struct _GstLaplacianClass GstLaplacianClass;
 
+#define DET_W 300   // chiều rộng thumbnail dùng để detect corner
+#define DET_H 100   // chiều cao thumbnail dùng để detect corner
+#define OUT_W 150   // chiều rộng output warp biển số
+#define OUT_H  50   // chiều cao output warp biển số
+
 struct _GstLaplacian
 {
   GstBaseTransform base_trans;
-  gint class_id; // Class ID to filter objects (e.g. 13 for license plate)
-  unsigned char* cpu_crop_buf; // Managed memory buffer for CPU contour finding
+  gint  class_id;
+
+  /* CPU-accessible managed buffer (DET_W × DET_H) — input cho pipeline OpenCV */
+  unsigned char* cpu_detect_buf;
+
+  /* Flag + context cho CPU */
+  gboolean cpu_initialized;
+  void*    cpu_ctx;   /* trỏ tới LaplCpuCtx* (C++ only, khai báo trong .cpp) */
 };
 
 struct _GstLaplacianClass
