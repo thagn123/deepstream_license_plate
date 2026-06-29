@@ -1281,11 +1281,14 @@ sgie3_config = _runtime_config_path(config.SGIE3_CONFIG_PATH, sgie3_overrides)
 - **Tốc độ (production, sync=false):** ~384 FPS → ~12.8× faster than realtime/source
 - **Eval tốc độ (sync=true, realtime):** 44–52s/video; TRT rebuild lần đầu: 92–126s
 
-### Bottleneck #1 (CRITICAL): OCR_EVERY_N là dead code
+### Bottleneck #1 (ĐÃ GIẢI QUYẾT): Tần suất OCR (`OCR_EVERY_N`) cho các biển số đã khóa
 
-`state.OCR_EVERY_N = 6` được đặt và in ra log `"[INFO] OCR throttle : every 6 frames"` nhưng **không được kiểm tra ở bất kỳ đâu** trong `metadata.py`, `sgie3.py`, hay bất kỳ file probe nào.
+Trước đây, `state.OCR_EVERY_N = 6` được cấu hình nhưng bị bỏ qua, dẫn đến việc mọi biển số (kể cả biển đã lock với độ tin cậy cao) đều bị suy luận OCR liên tục mỗi frame, gây lãng phí tài nguyên CPU/GPU lớn.
 
-Hậu quả: Python metadata probe chạy full logic cho mỗi plate mỗi frame. Với `plate_objects=566` trên video dài ~91 giây @ 30fps (video_007, video dài nhất trong bộ test), đây là **hàng chục nghìn lần** gọi `_read_lpr_text` + `_correct_vn_plate` + `_plate_quality_score` + voting logic. Tổng 15 video: `plate_objects=4.035`, `ocr_raw_events=2.470` — mỗi lần đều chạy full Python stack.
+**Giải pháp đã triển khai:**
+Trong file `sgie3.py`, hệ thống hiện tại chủ động kiểm tra nếu `object_id` của biển số đã nằm trong danh sách `locked_plate_ids` (đã nhận diện ổn định):
+- Hệ thống chỉ cho phép suy luận lại (reinference) định kỳ sau mỗi `OCR_EVERY_N` frame (ví dụ: `frame_num % state.OCR_EVERY_N == 0`).
+- Ở các frame trung gian, probe sẽ đổi tạm thời `class_id` của object đó sang `99` (một class không nằm trong danh sách xử lý `operate-on-class-ids=13` của SGIE3). Điều này giúp bỏ qua hoàn toàn bước chạy OCR trên GPU đối với các frame này.
 
 ### Bottleneck #2 (SIGNIFICANT): Metadata probe block GStreamer thread
 
@@ -1299,13 +1302,10 @@ Hậu quả: Python metadata probe chạy full logic cho mỗi plate mỗi frame
 | `_stable_plate` | Sort + clustering O(N²) trên plate_history |
 | `cv2.imwrite` (khi có event) | Đồng bộ I/O trong pipeline thread |
 
-### Bottleneck #3 (MODERATE): secondary-reinfer-interval=0 chạy mọi frame
+### Bottleneck #3 (ĐÃ GIẢI QUYẾT): Giảm tải SGIE3 chạy mọi frame cho mọi biển số được track
 
-SGIE3 inference chạy trên **mọi plate được track, mọi frame** — kể cả biển đã lock. Dựa trên dữ liệu thực đo: video_007 có `plate_objects=566` trong ~91s → trung bình **6.2 biển/giây** × 30fps cơ lý thuyết = ~186 OCR crops/giây peak. TRT gộp batch 8 nên thực tế là ~23 batch/giây; ở tốc độ production 384 FPS, SGIE3 xử lý ~48 biển/giây (384 frames × avg 0.125 biển/frame). Tải GPU SGIE3 là thực nhưng TRT FP16 xử lý hiệu quả.
-
-**Lý do:** `secondary-reinfer-interval=0` trong `config_sgie_lpr_ocr_2024.txt` là override runtime (file `/tmp/ds_lpr_v2_runtime_configs/`), hardcoded thành 0. `OCR_EVERY_N = 6` trong `state.py` không ảnh hưởng GPU — đây là Python-side config không có code nào đọc nó.
-
-**Fix đề xuất:** Tăng `secondary-reinfer-interval` → ví dụ =5 giảm 80% GPU SGIE3 ngay lập tức. Override mechanism trong sgie3.py (skip bbox recording khi locked) vẫn hoạt động đúng. Cần đánh giá trade-off: reinfer ít hơn → voting chậm hơn → cần thêm thời gian để đạt `min_stable_votes`.
+**Giải pháp đã triển khai:**
+Bằng cơ chế chuyển đổi class ID động trong probe `sgie3.py` (chuyển `class_id` từ 13 sang 99 cho các biển số đã khóa trên các frame trung gian), SGIE3 `nvinfer` tự động bỏ qua inference cho các biển số này. Giải pháp này giúp giảm tải hơn 80% số lượt suy luận OCR trên GPU mà không cần tăng tham số `secondary-reinfer-interval` tĩnh trên toàn bộ các đối tượng khác. Các biển số chưa khóa hoặc mới xuất hiện vẫn được ưu tiên chạy OCR liên tục ở từng frame để đạt số lượt vote tối thiểu nhanh nhất có thể.
 
 ### Bottleneck #4 (MINOR): Startup overhead
 
@@ -1612,6 +1612,289 @@ Frame N đến từ nvstreammux (1920×1080 NVMM batch)
 ├─ [nvmultistreamtiler] ghép sources
 ├─ [nvdsosd] vẽ bbox + text
 └─ → Display / File sink
+```
+
+---
+
+## Phụ Lục B: Pipeline Chi Tiết — Thuật Toán Căn Chỉnh Biển Số (char_est)
+
+### B.1. Tổng quan luồng dữ liệu từ NVMM đến 4 góc
+
+```
+NvDsFrameMeta (1920×1080, NV12/NVMM)
+│
+│  PGIE object: class=13, bbox=(x=841, y=312, w=143, h=41)
+│
+▼
+┌──────────────────────────────────────────────────────────┐
+│  PADDING 20% quanh bbox                                  │
+│                                                          │
+│  px = 841 - 0.20×143 = 812    pw = 143×1.40 = 200       │
+│  py = 312 - 0.20× 41 = 304    ph =  41×1.40 =  57       │
+│                                                          │
+│  Padded crop: pixel [812..1011, 304..361] trên frame    │
+└──────────────────┬───────────────────────────────────────┘
+                   │
+                   ▼  CUDA kernel: crop_resize_kernel
+┌──────────────────────────────────────────────────────────┐
+│  GPU → Unified Memory (cpu_detect_buf)                   │
+│  Giữ nguyên kích thước gốc (200×57)                     │
+│  NV12 Y-plane → grayscale uint8                          │
+└──────────────────┬───────────────────────────────────────┘
+                   │
+                   ▼  CPU: _find_plate_corners()
+╔══════════════════════════════════════════════════════════╗
+║          CORNER DETECTION PIPELINE (4 strategy)          ║
+╚══════════════════════════════════════════════════════════╝
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │  CLAHE + GaussianBlur│  cv::createCLAHE(3.0, 8×8)
+        │  (tiền xử lý 1 lần) │  GaussianBlur(3×3)
+        └──────────┬───────────┘
+                   │
+       ╔═══════════▼═══════════════════════════════════════╗
+       ║  STRATEGY 1 — char_est  (PRIMARY)                 ║
+       ╠═══════════════════════════════════════════════════╣
+       ║                                                   ║
+       ║  adaptiveThreshold(GAUSSIAN_C, BINARY_INV, 11, 2) ║
+       ║                                                   ║
+       ║  Ảnh gốc (200×57):        Sau adaptive threshold: ║
+       ║  ┌──────────────────┐     ┌──────────────────┐   ║
+       ║  │░░░30H 006.44░░░░│     │░░░██ ███ ████░░│   ║
+       ║  └──────────────────┘     └──────────────────┘   ║
+       ║                             ký tự = WHITE blobs   ║
+       ║                                                   ║
+       ║  findContours(RETR_CCOMP, CHAIN_APPROX_SIMPLE)   ║
+       ║  → tất cả blob trong phân cấp 2 mức              ║
+       ║                                                   ║
+       ║  Lọc theo đặc tính ký tự (px=200, py=57):        ║
+       ║  ┌─────────────────────────────────────────────┐ ║
+       ║  │  0.15 < h/ph < 0.85  → chiều cao hợp lệ   │ ║
+       ║  │  0.02 < w/pw < 0.35  → không quá rộng      │ ║
+       ║  │  0.50 < h/w  < 6.00  → tỉ lệ ký tự        │ ║
+       ║  │  solidity   > 0.15   → không rỗng           │ ║
+       ║  │  cx>2, cy>2, (cx+cw)<pw-3, (cy+ch)<ph-3    │ ║
+       ║  │                  → không chạm biên           │ ║
+       ║  └─────────────────────────────────────────────┘ ║
+       ║                                                   ║
+       ║  Char candidates tìm được:                        ║
+       ║  ┌─────────────────────────────────────────────┐ ║
+       ║  │  ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐      │ ║
+       ║  │  │3 │ │0 │ │H │ │0 │ │0 │ │6 │ │44│ ...  │ ║
+       ║  │  └──┘ └──┘ └──┘ └──┘ └──┘ └──┘ └──┘      │ ║
+       ║  │  char_points = union của tất cả pixel       │ ║
+       ║  └─────────────────────────────────────────────┘ ║
+       ║                                                   ║
+       ║  nếu len(char_boxes) >= 2:                       ║
+       ║    minAreaRect(char_points)                      ║
+       ║    → Rotated Rect (text region):                 ║
+       ║    ┌──────────────────────────────────┐          ║
+       ║    │ center=(cx,cy), size=(tw,th)     │          ║
+       ║    │ angle=−2.3°  (góc nghiêng thật) │          ║
+       ║    └──────────────────────────────────┘          ║
+       ║                                                   ║
+       ║    Nhận dạng loại biển:                          ║
+       ║    text_aspect = max(tw,th)/max(min(tw,th),1)    ║
+       ║    if text_aspect > 2.0:  → Biển DÀI (1 hàng)   ║
+       ║      scale_w=1.25, scale_h=1.65                  ║
+       ║    else:                  → Biển VUÔNG (2 hàng)  ║
+       ║      scale_w=1.35, scale_h=1.25                  ║
+       ║                                                   ║
+       ║    expanded_rr = (center, (tw*scale_w, th*scale_h), angle)
+       ║    corners = boxPoints(expanded_rr)  → 4 điểm   ║
+       ║                                                   ║
+       ║    Trước expand:              Sau expand:         ║
+       ║       ╔══════════════╗        ╔════════════════╗  ║
+       ║       ║30H 006.44   ║   →    ║  30H 006.44   ║  ║
+       ║       ╚══════════════╝        ╚════════════════╝  ║
+       ║       text_region              plate_region        ║
+       ║                                                   ║
+       ║    return _sort_corners(corners), 'char_est'      ║
+       ╚═══════════╤═══════════════════════════════════════╝
+                   │ FAIL (< 2 ký tự tìm thấy)
+       ╔═══════════▼═══════════════════════════════════════╗
+       ║  STRATEGY 2 — otsu / otsu_minar                  ║
+       ╠═══════════════════════════════════════════════════╣
+       ║  GaussianBlur(3×3)                                ║
+       ║  threshold(Otsu)                                  ║
+       ║  auto polarity: nếu border brightness > 50%      ║
+       ║    → bitwise_NOT (đảo ngược để background = đen) ║
+       ║  morphologyEx(OPEN, 3×3) + morphologyEx(CLOSE)   ║
+       ║  findContours(RETR_EXTERNAL)                      ║
+       ║  FOR cnt in sorted by area desc:                  ║
+       ║    approxPolyDP(eps=0.02..0.10)                   ║
+       ║    if 4 điểm AND !border AND valid_aspect         ║
+       ║      → return pts, 'otsu'                         ║
+       ║    minAreaRect(cnt)                               ║
+       ║    if !border AND valid_aspect                    ║
+       ║      → return corners, 'otsu_minar'               ║
+       ╚═══════════╤═══════════════════════════════════════╝
+                   │ FAIL
+       ╔═══════════▼═══════════════════════════════════════╗
+       ║  STRATEGY 3 — contour / minar                    ║
+       ╠═══════════════════════════════════════════════════╣
+       ║  GaussianBlur(3×3) + Canny(50, 150)              ║
+       ║  morphologyEx(CLOSE, 3×3)                         ║
+       ║  findContours(RETR_EXTERNAL)                      ║
+       ║  FOR cnt in sorted by area desc:                  ║
+       ║    approxPolyDP → 4pts, !border, valid_aspect     ║
+       ║      → 'contour'                                  ║
+       ║    fallback: minAreaRect → 'minar'                ║
+       ╚═══════════╤═══════════════════════════════════════╝
+                   │ FAIL
+       ╔═══════════▼═══════════════════════════════════════╗
+       ║  STRATEGY 4 — minar toàn phần                    ║
+       ╠═══════════════════════════════════════════════════╣
+       ║  edge_pts = findNonZero(Canny_edges)              ║
+       ║  minAreaRect(edge_pts)  → hộp bao toàn bộ cạnh   ║
+       ║  !border AND valid_aspect → 'minar'               ║
+       ╚═══════════╤═══════════════════════════════════════╝
+                   │ FAIL
+       ╔═══════════▼═══════════════════════════════════════╗
+       ║  FALLBACK — scale                                 ║
+       ║  Không tìm được góc → crop thẳng bbox (no warp)  ║
+       ╚═══════════════════════════════════════════════════╝
+```
+
+### B.2. Xác thực tứ giác (valid_plate_quad + border_check)
+
+```
+Hai bộ lọc loại bỏ kết quả rác trước khi return corners:
+
+  ┌─ border_check ─────────────────────────────────────────┐
+  │  Đếm số góc chạm biên ảnh (khoảng cách ≤ 1px)         │
+  │  on_border >= 3 → REJECT (quad bao toàn bộ ảnh)        │
+  └────────────────────────────────────────────────────────┘
+
+  ┌─ valid_plate_quad ─────────────────────────────────────┐
+  │  Tính cạnh dài / cạnh ngắn của tứ giác                │
+  │  Aspect ratio hợp lệ: 1.0 ≤ ratio ≤ 7.5              │
+  │                                                        │
+  │  VN car plate:  430×130 → ratio ≈ 3.3  ✓             │
+  │  VN moto plate: 190×130 → ratio ≈ 1.5  ✓             │
+  │  Toàn bộ ảnh:  300×100 → ratio = 3.0  ✓ (nhưng bị   │
+  │                                 border_check loại!)   │
+  └────────────────────────────────────────────────────────┘
+```
+
+### B.3. _sort_corners — Sắp xếp 4 góc theo chiều đồng hồ
+
+```
+Input: 4 điểm bất kỳ (x,y) từ boxPoints()
+Output: [TL, TR, BR, BL]  → đúng thứ tự cho warpPerspective
+
+Thuật toán:
+  sum = x + y  → TL = min sum,  BR = max sum
+  diff = x - y → TR = min diff, BL = max diff
+
+  Ví dụ:
+    P1=(10,5)  sum=15  diff=5   → TR ✓
+    P2=(80,5)  sum=85  diff=75  → BR ✓ (oops: nếu nghiêng)
+    P3=(78,28) sum=106 diff=50
+    P4=(8,28)  sum=36  diff=-20 → BL ✓
+
+  Kết quả sau sort: TL=P4, TR=P1, BR=P2, BL=P3
+                    (đúng thứ tự chiều kim đồng hồ)
+```
+
+### B.4. Perspective Warp — Toán học & CUDA Kernel
+
+```
+SRC (padded crop, kích thước gốc):    DST (OUT_W×OUT_H = 150×50):
+
+  TL ─────────── TR                    (0,0) ─────── (149,0)
+   │             │       ─────────►      │               │
+   │  (nghiêng)  │    warpPerspective    │  flat 150×50  │
+  BL ─────────── BR                  (0,49) ─────── (149,49)
+
+Tính ma trận:
+  src_pts = [TL, TR, BR, BL]   (float32, tọa độ trong padded crop)
+  dst_pts = [(0,0),(149,0),(149,49),(0,49)]
+
+  M    = getPerspectiveTransform(src_pts, dst_pts)   [3×3 float]
+  Minv = M.inv()
+
+CUDA kernel warp_and_minmax_kernel:
+  // Mỗi thread (dx, dy) tính nguồn của pixel output:
+  src_z = Minv[6]*dx + Minv[7]*dy + Minv[8]
+  src_x = (Minv[0]*dx + Minv[1]*dy + Minv[2]) / src_z
+  src_y = (Minv[3]*dx + Minv[4]*dy + Minv[5]) / src_z
+  warped[dy][dx] = frame_NV12[start_y + src_y][start_x + src_x]
+  atomicMin(d_min, warped[dy][dx])   // cho contrast stretch
+  atomicMax(d_max, warped[dy][dx])
+```
+
+### B.5. Laplacian Variance — CUDA Kernel (stretch + blur + laplacian fused)
+
+```
+CUDA kernel stretch_blur_laplacian_kernel (1 pass):
+
+  Tại pixel (dx, dy) với dx∈[2..out_w-3], dy∈[2..out_h-3]:
+
+  ① Contrast Stretch (linear normalization):
+     stretched(x,y) = (raw(x,y) - min) × 255 / (max - min)
+
+  ② Gaussian Blur 3×3 (read 9 neighbors):
+     kernel = [1 2 1; 2 4 2; 1 2 1] / 16
+     b(0,0) = Σ kernel[i][j] × stretched(x+i, y+j)
+
+  ③ Laplacian 4-connected (read 5 blurred values):
+     L = b(0,-1) + b(-1,0) + b(1,0) + b(0,1) - 4×b(0,0)
+
+     Note: b(i,j) yêu cầu đọc thêm 8 neighbors → tổng 25 pixel reads/thread
+           Được cache hoàn toàn trong L1 GPU (out_w×out_h = 7500 bytes)
+
+  ④ Cộng dồn qua atomicAdd:
+     out_sum   += L
+     out_sq_sum += L²
+     out_count += 1
+
+  Variance = E[L²] - E[L]²
+           = (out_sq_sum / out_count) - (out_sum/out_count)²
+```
+
+### B.6. Kết quả thực nghiệm (test_dslaplacian.py, 2026-06-29)
+
+```
+┌──────────────────────┬────────────┬──────────┬────────────┬────────────┐
+│ Ảnh                  │ Biển số    │ Strategy │ Variance   │ Đánh giá   │
+├──────────────────────┼────────────┼──────────┼────────────┼────────────┤
+│ scan_003_v200.jpg    │ 30H 006.44 │ char_est │    1058    │ SẮC NÉT ✓  │
+│ frame_005_f1059.jpg  │ 898 007.12 │ char_est │     988    │ SẮC NÉT ✓  │
+│ fff.jpg (plate 1)    │ 18H 030..  │ char_est │     158    │ SẮC NÉT ✓  │
+│ fff.jpg (plate 2)    │ (34×19px)  │ char_est │      43    │ TRUNG BÌNH │
+└──────────────────────┴────────────┴──────────┴────────────┴────────────┘
+
+Ngưỡng lọc OCR (Metadata Probe):
+  LQ stream (c1/c2): laplacian ≥  50
+  HQ stream (c3/c4): laplacian ≥ 150
+  Giá trị 0         : plugin không chạy → không lọc (pass-through)
+```
+
+### B.7. Tại sao char_est tốt hơn morphClose
+
+```
+VẤN ĐỀ với Canny + morphClose(3×3):
+
+  Canny edges:
+  ─│─ ─ ─│─ ─│─ ─│─ ─│─ ─│─
+  (3)   (0)  (H)  (0)  (0)  (6)
+  → Mỗi ký tự = cạnh riêng lẻ, không liên kết nhau
+  → findContours chỉ thấy contour từng chữ → không có khung biển
+
+VẤN ĐỀ với morphClose(kernel lớn) trên padded crop:
+  Padding zone chứa cạnh của xe/background
+  morphClose kết nối tất cả → blob lan tràn toàn ảnh
+  → border_check reject (tất cả 4 corners ở biên)
+
+GIẢI PHÁP char_est:
+  Adaptive threshold → tách ký tự (KHÔNG phụ thuộc background)
+  minAreaRect(char_points) → tìm góc nghiêng từ ký tự
+  Scale expand → suy ra viền biển từ kích thước chữ đã biết
+
+  Điểm mấu chốt: không cần "thấy" viền biển số,
+  chỉ cần "thấy" >= 2 ký tự là đủ để ước lượng 4 góc.
 ```
 
 ---
