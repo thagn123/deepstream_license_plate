@@ -41,12 +41,9 @@ echo "[5/5] DeepStream Pipeline... (Ctrl+C để dừng)"
 
 docker exec ds90 rm -rf /tmp/ds_lpr_v2_runtime_configs
 
-# Khởi động NVIDIA Xorg :2 bên trong container (cần cho nveglglessink / NVIDIA EGL)
-docker exec ds90 /usr/local/bin/start-nvidia-display.sh
-
-# DISPLAY=:2: NVIDIA Xorg nội bộ container — đúng EGL path (DRI2), tránh Mesa fallback
+# Khởi chạy bằng ximagesink hiển thị trực tiếp lên màn hình của Host (yêu cầu chạy xhost +local:docker ngoài máy host)
 docker exec -w /workspace/last_ds_cp ds90 \
-    env DISPLAY=:2 \
+    env DISPLAY=:0 USE_XIMAGESINK=1 \
         GST_REGISTRY=/workspace/.gst_registry.bin \
     python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_005 \

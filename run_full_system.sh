@@ -58,13 +58,10 @@ echo "Nhấn Ctrl+C ở terminal này để dừng toàn bộ hệ thống."
 # Cài đặt trap để khi bạn nhấn Ctrl+C, script sẽ tự động kill các tiến trình ngầm
 trap "echo -e '\n[INFO] Đang đóng hệ thống...'; kill $FORWARDER_PID $MONITOR_PID 2>/dev/null; exit 0" SIGINT SIGTERM
 
-# Khởi động NVIDIA Xorg :2 bên trong container nếu chưa chạy.
-# nveglglessink yêu cầu NVIDIA EGL qua DRI2 — chỉ có NVIDIA Xorg mới cung cấp DRI2.
-# XWayland chỉ hỗ trợ DRI3 (không tương thích với NVIDIA EGL).
-echo "[INFO] Đảm bảo NVIDIA Xorg :2 đang chạy bên trong container..."
-docker exec ds90 /usr/local/bin/start-nvidia-display.sh
-
-docker exec -w /workspace/last_ds_cp ds90 env DISPLAY=:2 python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
+# Khởi chạy bằng ximagesink hiển thị trực tiếp lên màn hình của Host (yêu cầu chạy xhost +local:docker ngoài máy host)
+docker exec -w /workspace/last_ds_cp ds90 \
+    env DISPLAY=:0 USE_XIMAGESINK=1 \
+    python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_001 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_002 \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_003 \
