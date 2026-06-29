@@ -304,17 +304,50 @@ __global__ void crop_resize_kernel(const uint8_t* in_data, int in_pitch, ...) {
 }
 ```
 
-**Bước 2 — Tìm 4 góc biển số (CPU, thuật toán tuần tự):**
+**Bước 2 — Căn chỉnh góc nghiêng và Tìm 4 góc biển số (CPU, thuật toán độ phân giải gốc & định vị ký tự):**
 
-CPU nhận ảnh nhỏ, chạy pipeline OpenCV:
-1. `cv::Canny(blur, edges, 50, 150)` — phát hiện cạnh
-2. `cv::findContours(...)` — tìm tất cả viền
-3. `approxPolyDP(contour, approx, arcLength * 0.02, true)` — xấp xỉ đa giác
-4. Tìm tứ giác 4 điểm lớn nhất → đây là khung biển số
-5. `cv::getPerspectiveTransform(src_pts, dst_pts)` → tính ma trận M
-6. `M_inv = M.inv()` → ném ngược lại cho GPU
+CPU nhận ảnh nhỏ được GPU cắt kèm 30% padding ở độ phân giải gốc (Native Resolution), không qua nội suy resize để bảo toàn độ sắc nét tối đa. Quy trình xử lý gồm các chiến lược sau:
 
-Nếu không tìm được tứ giác (viền bị che, diện tích < 40% bbox) → fallback sang crop thẳng (đánh dấu `_raw`).
+1. **Chiến lược Ưu tiên: Định vị lõi ký tự (Character-Based Alignment - `char_est`):**
+   - **Adaptive Thresholding:** Chạy `cv::adaptiveThreshold` với kích thước khối $11 \times 11$ và hằng số giảm nhiễu $C = 2$ để bóc tách chữ số đen trên nền trắng, tránh hoàn toàn ảnh hưởng của cản xe (bumper) sáng màu xung quanh.
+   - **RETR_CCOMP & Lọc Heuristic:** Tìm các contour trong phân cấp 2 mức (`cv::RETR_CCOMP`) để lọc ra các contour ký tự thực sự (không lấy viền ngoài bumper) dựa trên kích thước tỷ lệ (chiều cao h: $15\% - 85\%$, chiều rộng w: $2\% - 35\%$, tỷ lệ khung hình $0.5 - 6.0$, độ đặc solidity $> 0.15$).
+   - **Gom cụm & minAreaRect:** Gom tọa độ của tất cả các chữ số hợp lệ (yêu cầu $\ge 2$ ký tự) và tìm hộp bao nghiêng tối thiểu (`cv::minAreaRect`). Hộp bao này phản ánh chính xác 100% góc xoay và tâm của biển số.
+   - **Mở rộng theo Tỷ lệ chuẩn (Aspect Ratio Scaling):** Dựa vào tỷ lệ khung hình lõi chữ để nhận dạng biển dài hay vuông, ta nhân rộng kích thước hộp nghiêng ra ngoài biên biển thật (biển dài: rộng $\times 1.25$, cao $\times 1.65$; biển vuông: rộng $\times 1.35$, cao $\times 1.25$) để khôi phục 4 góc của biển số thật.
+
+2. **Cơ chế Fallback Đa tầng (Robust Fallback Stack):**
+   Nếu số lượng ký tự tìm thấy $< 2$ (do biển quá mờ, che khuất hoặc tối tăm), hệ thống tự động kích hoạt các cấp dự phòng liên tiếp:
+   - **Cấp độ 2 (Otsu Contour):** Làm mịn ảnh bằng Gaussian Blur, chạy phân ngưỡng toàn cục Otsu, đóng hình học `MORPH_CLOSE` nối viền ngoài và xấp xỉ tứ giác `approxPolyDP` hoặc dùng `minAreaRect` của viền lớn nhất (`otsu` / `otsu_minar`).
+   - **Cấp độ 3 (Canny Contours):** Dò cạnh Canny biên độ cao ($50 - 150$), đóng viền cạnh và tìm góc lồi hoặc hộp bao nghiêng của các đường cạnh (`contour` / `minar`).
+   - **Cấp độ 4 (Canny minAreaRect toàn phần):** Vẽ hộp bao nghiêng tối thiểu `minAreaRect` bao phủ toàn bộ các pixel cạnh Canny tìm được trong ảnh (`minar` toàn phần).
+   - **Cấp độ 5 (Scale tĩnh cuối cùng):** Nếu tất cả các bước trên đều thất bại, hệ thống tự động trả về ma trận scale thuần túy (không xoay) để đảm bảo pipeline GStreamer chạy liên tục, không bao giờ bị crash và vẫn trả về ảnh tốt nhất cho SGIE3.
+
+**Sơ đồ khối thuật toán căn chỉnh biển số:**
+
+```mermaid
+graph TD
+    A["Ảnh Crop Padded (Native Resolution)"] --> B["Phân ngưỡng thích ứng (Adaptive Threshold)"]
+    B --> C["Tìm Contour phân cấp (RETR_CCOMP)"]
+    C --> D{"Tìm thấy >= 2 ký tự?"}
+    D -- "Có" --> E["Tìm hộp bao nghiêng (minAreaRect) cho cụm chữ"]
+    E --> F["Mở rộng tỷ lệ chuẩn (Aspect Ratio Scaling)"]
+    F --> G["Xác định 4 góc biển số (char_est)"]
+    D -- "Không" --> H["Phân ngưỡng Otsu & Đóng hình học viền ngoài"]
+    H --> I{"Tìm thấy viền hợp lệ?"}
+    I -- "Có" --> J["Xác định 4 góc (otsu / otsu_minar)"]
+    I -- "Không" --> K["Dò cạnh Canny & Đóng viền cạnh"]
+    K --> L{"Tìm thấy viền hợp lệ?"}
+    L -- "Có" --> M["Xác định 4 góc (contour / minar)"]
+    L -- "Không" --> N["Gom toàn bộ pixel cạnh Canny"]
+    N --> O{"Tìm thấy hộp nghiêng?"}
+    O -- "Có" --> P["Xác định 4 góc (minar toàn phần)"]
+    O -- "Không" --> Q["Scale tĩnh thông thường (scale - không xoay)"]
+    
+    G --> R["Tính ma trận M & M_inv chuyển ngược cho GPU"]
+    J --> R
+    M --> R
+    P --> R
+    Q --> R
+```
 
 **Bước 3 — Warp + Equalize + Blur + Laplacian (GPU, tất cả trong 2 kernel):**
 
