@@ -191,7 +191,9 @@ def _quad_from_mask(mask, min_area):
 
 def _find_plate_corners(gray_padded, orig_bbox_w, orig_bbox_h):
     """
-    Tìm 4 góc biển số trong padded crop ở độ phân giải gốc (Native Resolution).
+    Tìm 4 góc biển số trong padded crop ở độ phân giải gốc (Native Resolution)
+    bằng cách dò tìm và gom cụm các ký tự (adaptive threshold + RETR_CCOMP),
+    hoặc fallback về các phương án contour/scale thông thường.
     """
     pw = gray_padded.shape[1]
     ph = gray_padded.shape[0]
@@ -199,6 +201,77 @@ def _find_plate_corners(gray_padded, orig_bbox_w, orig_bbox_h):
     if orig_bbox_w < 10 or orig_bbox_h < 4:
         return None, 'scale'
 
+    # 1. Adaptive Thresholding to isolate characters
+    block_size = 11
+    thresh = cv2.adaptiveThreshold(
+        gray_padded, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_size, 2
+    )
+
+    # Find all contours with hierarchy
+    cnts, hierarchy = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is not None and len(cnts) > 0:
+        hierarchy = hierarchy[0]
+        char_points = []
+        char_boxes = []
+
+        for c_idx, cnt in enumerate(cnts):
+            cx, cy, cw, ch = cv2.boundingRect(cnt)
+            h_ratio = ch / float(ph)
+            w_ratio = cw / float(pw)
+            aspect = ch / float(cw) if cw > 0 else 0
+
+            # Characters must not touch the crop boundaries and have character-like shapes
+            if 0.15 < h_ratio < 0.85 and 0.02 < w_ratio < 0.35 and 0.5 < aspect < 6.0:
+                if cx > 2 and cy > 2 and (cx + cw) < pw - 3 and (cy + ch) < ph - 3:
+                    area = cv2.contourArea(cnt)
+                    solidity = area / (cw * ch) if (cw * ch) > 0 else 0
+                    if solidity > 0.15:
+                        char_boxes.append((cx, cy, cw, ch))
+                        for pt in cnt:
+                            char_points.append(pt[0])
+
+        # If we have enough character candidates, we calculate the estimated plate bounding box
+        if len(char_boxes) >= 2:
+            char_points = np.array(char_points)
+            rr = cv2.minAreaRect(char_points)
+            
+            # Determine scaling factors based on aspect ratio of the text region
+            char_w, char_h = rr[1][0], rr[1][1]
+            text_aspect = max(char_w, char_h) / max(min(char_w, char_h), 1.0)
+            if char_w < char_h:
+                # Rotated by ~90 degrees or height is larger, handle accordingly
+                text_aspect = char_h / max(char_w, 1.0)
+
+            if text_aspect > 2.0:
+                # 1-line long plate
+                scale_w = 1.25
+                scale_h = 1.65
+            else:
+                # 2-line square plate
+                scale_w = 1.35
+                scale_h = 1.25
+
+            center = rr[0]
+            size = rr[1]
+            angle = rr[2]
+
+            expanded_size = (size[0] * scale_w, size[1] * scale_h)
+            # Clip expanded size to not exceed crop dimensions
+            expanded_size = (min(expanded_size[0], pw * 0.98), min(expanded_size[1], ph * 0.98))
+
+            expanded_rr = (center, expanded_size, angle)
+            expanded_corners = cv2.boxPoints(expanded_rr).astype(np.float32)
+
+            # Clamp corners to crop image bounds
+            clamped_corners = []
+            for p in expanded_corners:
+                px_val = np.clip(p[0], 0, pw - 1)
+                py_val = np.clip(p[1], 0, ph - 1)
+                clamped_corners.append([px_val, py_val])
+
+            return _sort_corners(np.array(clamped_corners)), 'char_est'
+
+    # Fallback to standard Otsu/Canny external contour
     # Border check helper
     def is_border_quad(pts):
         on_border = 0
@@ -210,17 +283,16 @@ def _find_plate_corners(gray_padded, orig_bbox_w, orig_bbox_h):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     min_area = 0.10 * pw * ph
 
-    # ── Strategy 1: Otsu ──
+    # ── Strategy 2: Otsu ──
     blur_otsu = cv2.GaussianBlur(gray_padded, (3, 3), 0)
-    _, thresh = cv2.threshold(blur_otsu, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, thresh_otsu = cv2.threshold(blur_otsu, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
-    # Check border white count to invert if needed
-    border_pixels = np.sum(thresh[0:2, :]) + np.sum(thresh[-2:, :]) + np.sum(thresh[:, 0:2]) + np.sum(thresh[:, -2:])
+    border_pixels = np.sum(thresh_otsu[0:2, :]) + np.sum(thresh_otsu[-2:, :]) + np.sum(thresh_otsu[:, 0:2]) + np.sum(thresh_otsu[:, -2:])
     total_border = (2 * pw * 2) + (2 * ph * 2)
     if border_pixels / 255 > total_border * 0.5:
-        thresh = cv2.bitwise_not(thresh)
+        thresh_otsu = cv2.bitwise_not(thresh_otsu)
 
-    processed = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+    processed = cv2.morphologyEx(thresh_otsu, cv2.MORPH_OPEN, kernel)
     processed = cv2.morphologyEx(processed, cv2.MORPH_CLOSE, kernel)
 
     cnts, _ = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -245,7 +317,7 @@ def _find_plate_corners(gray_padded, orig_bbox_w, orig_bbox_h):
         if not is_border_quad(corners) and _valid_plate_quad(corners):
             return corners, 'otsu_minar'
 
-    # ── Strategy 2: Canny Contours ──
+    # ── Strategy 3: Canny Contours ──
     blur_canny = cv2.GaussianBlur(gray_padded, (3, 3), 0)
     edges = cv2.Canny(blur_canny, 50, 150)
     closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
@@ -271,7 +343,7 @@ def _find_plate_corners(gray_padded, orig_bbox_w, orig_bbox_h):
         if not is_border_quad(corners) and _valid_plate_quad(corners):
             return corners, 'minar'
 
-    # ── Strategy 3: minAreaRect on all Canny edges ──
+    # ── Strategy 4: minAreaRect on all Canny edges ──
     edge_pts = cv2.findNonZero(edges)
     if edge_pts is not None and len(edge_pts) >= 4:
         rr = cv2.minAreaRect(edge_pts)

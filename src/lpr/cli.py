@@ -65,6 +65,10 @@ def _parse_args(args):
             save_crops = _nextval()
         elif a.startswith("--save-crops="):
             save_crops = a.split("=", 1)[1]
+        elif a == "--ocr-backend":
+            ocr_backend = _nextval()
+        elif a.startswith("--ocr-backend="):
+            ocr_backend = a.split("=", 1)[1]
         elif a == "--debug-jsonl":
             debug_jsonl = _nextval()
         elif a.startswith("--debug-jsonl="):

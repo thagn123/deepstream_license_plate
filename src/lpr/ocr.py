@@ -23,6 +23,10 @@ _NEW_BLANK = 0
 _NEW_LAYER = "output"
 _NEW_N_CLS = len(_NEW_VOCAB)  # 37
 
+_LPR_CHARS = "0123456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
+_LPR_BLANK = len(_LPR_CHARS)
+_LPR_LAYER = "tf_op_layer_ArgMax"
+
 _warn_layer_missing = False
 
 
@@ -41,9 +45,22 @@ def _decode_new_ctc(floats, T, C):
     return text, conf
 
 
+def _decode_lpr_indices(indices: list) -> str:
+    result = []
+    prev = -1
+    blank_id = _LPR_BLANK
+    for idx in indices:
+        if idx != blank_id and idx != prev:
+            if 0 <= idx < len(_LPR_CHARS):
+                result.append(_LPR_CHARS[idx])
+        prev = idx
+    return "".join(result)
+
+
 def _read_lpr_text(obj_meta, gie_unique_id: int = config.SGIE3_UNIQUE_ID) -> tuple:
-    """Read OCR text from lpr_ocr.20240305.onnx output tensor metadata."""
+    """Read OCR text from tensor metadata, selecting backend from state.ocr_backend."""
     global _warn_layer_missing
+    from lpr import state
     l_user = obj_meta.obj_user_meta_list
     while l_user is not None:
         try:
@@ -53,37 +70,59 @@ def _read_lpr_text(obj_meta, gie_unique_id: int = config.SGIE3_UNIQUE_ID) -> tup
         if user_meta.base_meta.meta_type == pyds.NvDsMetaType.NVDSINFER_TENSOR_OUTPUT_META:
             tensor_meta = pyds.NvDsInferTensorMeta.cast(user_meta.user_meta_data)
             if tensor_meta.unique_id == gie_unique_id:
-                found = False
-                for i in range(tensor_meta.num_output_layers):
-                    layer = pyds.get_nvds_LayerInfo(tensor_meta, i)
-                    if layer.layerName != _NEW_LAYER:
-                        continue
-                    found = True
-                    dims = layer.dims
-                    # dims can be [T, C] or [1, T, C]
-                    if dims.numDims == 3:
-                        T, C = dims.d[1], dims.d[2]
-                    elif dims.numDims == 2:
-                        T, C = dims.d[0], dims.d[1]
-                    else:
-                        break
-                    if C != _NEW_N_CLS:
-                        sys.stderr.write(
-                            f"[WARN] ocr: expected {_NEW_N_CLS} classes, got {C}\n"
+                if state.ocr_backend == "lprnet":
+                    found = False
+                    for i in range(tensor_meta.num_output_layers):
+                        layer = pyds.get_nvds_LayerInfo(tensor_meta, i)
+                        if layer.layerName != _LPR_LAYER:
+                            continue
+                        found = True
+                        dims = layer.dims
+                        n = dims.d[0] if dims.numDims == 1 else (dims.d[1] if dims.numDims == 2 else 24)
+                        ptr = ctypes.cast(
+                            pyds.get_ptr(layer.buffer),
+                            ctypes.POINTER(ctypes.c_int32),
                         )
-                        break
-                    ptr = ctypes.cast(
-                        pyds.get_ptr(layer.buffer),
-                        ctypes.POINTER(ctypes.c_float),
-                    )
-                    floats = [ptr[j] for j in range(T * C)]
-                    text, conf = _decode_new_ctc(floats, T, C)
-                    return (text, conf) if text else ("", 0.0)
-                if not found and not _warn_layer_missing:
-                    sys.stderr.write(
-                        f"[WARN] ocr: layer '{_NEW_LAYER}' not found in SGIE3 output.\n"
-                    )
-                    _warn_layer_missing = True
+                        indices = [ptr[j] for j in range(n)]
+                        text = _decode_lpr_indices(indices)
+                        return (text, 0.55) if text else ("", 0.0)
+                    if not found and not _warn_layer_missing:
+                        sys.stderr.write(
+                            f"[WARN] ocr: layer '{_LPR_LAYER}' not found in SGIE3 output.\n"
+                        )
+                        _warn_layer_missing = True
+                else:
+                    found = False
+                    for i in range(tensor_meta.num_output_layers):
+                        layer = pyds.get_nvds_LayerInfo(tensor_meta, i)
+                        if layer.layerName != _NEW_LAYER:
+                            continue
+                        found = True
+                        dims = layer.dims
+                        # dims can be [T, C] or [1, T, C]
+                        if dims.numDims == 3:
+                            T, C = dims.d[1], dims.d[2]
+                        elif dims.numDims == 2:
+                            T, C = dims.d[0], dims.d[1]
+                        else:
+                            break
+                        if C != _NEW_N_CLS:
+                            sys.stderr.write(
+                                f"[WARN] ocr: expected {_NEW_N_CLS} classes, got {C}\n"
+                            )
+                            break
+                        ptr = ctypes.cast(
+                            pyds.get_ptr(layer.buffer),
+                            ctypes.POINTER(ctypes.c_float),
+                        )
+                        floats = [ptr[j] for j in range(T * C)]
+                        text, conf = _decode_new_ctc(floats, T, C)
+                        return (text, conf) if text else ("", 0.0)
+                    if not found and not _warn_layer_missing:
+                        sys.stderr.write(
+                            f"[WARN] ocr: layer '{_NEW_LAYER}' not found in SGIE3 output.\n"
+                        )
+                        _warn_layer_missing = True
         try:
             l_user = l_user.next
         except StopIteration:

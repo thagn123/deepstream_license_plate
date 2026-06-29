@@ -217,67 +217,147 @@ static bool find_plate_corners(const cv::Mat& gray_padded,
     std::vector<cv::Point2f> plate_pts;
     bool found = false;
 
-    // ── Strategy 1: Otsu ──
-    cv::Mat blur_otsu, thresh;
-    cv::GaussianBlur(gray_padded, blur_otsu, cv::Size(3, 3), 0);
-    cv::threshold(blur_otsu, thresh, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+    // ── Strategy 1: Character-based Estimation (Adaptive Threshold + RETR_CCOMP) ──
+    {
+        cv::Mat thresh_adapt;
+        cv::adaptiveThreshold(gray_padded, thresh_adapt, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY_INV, 11, 2);
 
-    // Check border white count to invert if needed
-    double border_sum = 0;
-    for (int x = 0; x < pw; x++) {
-        border_sum += thresh.at<uchar>(0, x) + thresh.at<uchar>(1, x);
-        border_sum += thresh.at<uchar>(ph - 1, x) + thresh.at<uchar>(ph - 2, x);
-    }
-    for (int y = 0; y < ph; y++) {
-        border_sum += thresh.at<uchar>(y, 0) + thresh.at<uchar>(y, 1);
-        border_sum += thresh.at<uchar>(y, pw - 1) + thresh.at<uchar>(y, pw - 2);
-    }
-    double total_border = (2 * pw * 2) + (2 * ph * 2);
-    if (border_sum / 255.0 > total_border * 0.5) {
-        cv::bitwise_not(thresh, thresh);
-    }
+        std::vector<std::vector<cv::Point>> cnts_cc;
+        std::vector<cv::Vec4i> hierarchy_cc;
+        cv::findContours(thresh_adapt, cnts_cc, hierarchy_cc, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
 
-    cv::Mat processed;
-    cv::morphologyEx(thresh, processed, cv::MORPH_OPEN, kernel);
-    cv::morphologyEx(processed, processed, cv::MORPH_CLOSE, kernel);
+        if (!cnts_cc.empty() && !hierarchy_cc.empty()) {
+            std::vector<cv::Point> char_points;
+            std::vector<cv::Rect> char_boxes;
 
-    std::vector<std::vector<cv::Point>> cnts;
-    cv::findContours(processed, cnts, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    std::sort(cnts.begin(), cnts.end(), [](const auto& a, const auto& b) {
-        return cv::contourArea(a) > cv::contourArea(b);
-    });
+            for (size_t i = 0; i < cnts_cc.size(); ++i) {
+                cv::Rect rect = cv::boundingRect(cnts_cc[i]);
+                double area = cv::contourArea(cnts_cc[i]);
+                
+                float h_ratio = rect.height / (float)ph;
+                float w_ratio = rect.width / (float)pw;
+                float aspect = rect.width > 0 ? rect.height / (float)rect.width : 0.0f;
 
-    for (const auto& cnt : cnts) {
-        double area = cv::contourArea(cnt);
-        if (area < min_area) break;
-        std::vector<cv::Point> hull;
-        cv::convexHull(cnt, hull);
-        double peri = cv::arcLength(hull, true);
-        const double eps_list[] = {0.02, 0.04, 0.06, 0.08, 0.10};
-        for (double eps : eps_list) {
-            std::vector<cv::Point> approx;
-            cv::approxPolyDP(hull, approx, eps * peri, true);
-            if (approx.size() == 4) {
-                std::vector<cv::Point2f> pts(4);
-                for (int i = 0; i < 4; i++) pts[i] = cv::Point2f(approx[i]);
-                if (!is_border_quad(pts) && _valid_plate_quad_local(pts)) {
-                    plate_pts = pts;
-                    found = true;
-                    break;
+                if (h_ratio > 0.15f && h_ratio < 0.85f &&
+                    w_ratio > 0.02f && w_ratio < 0.35f &&
+                    aspect > 0.5f && aspect < 6.0f) {
+                    
+                    if (rect.x > 2 && rect.y > 2 &&
+                        (rect.x + rect.width) < pw - 3 &&
+                        (rect.y + rect.height) < ph - 3) {
+                        
+                        float solidity = rect.width * rect.height > 0 ? area / (float)(rect.width * rect.height) : 0.0f;
+                        if (solidity > 0.15f) {
+                            char_boxes.push_back(rect);
+                            for (const auto& pt : cnts_cc[i]) {
+                                char_points.push_back(pt);
+                            }
+                        }
+                    }
                 }
             }
-        }
-        if (found) break;
 
-        // Fallback to minAreaRect for this Otsu contour
-        cv::RotatedRect rr = cv::minAreaRect(cnt);
-        cv::Point2f corners[4];
-        rr.points(corners);
-        if (!is_border_quad_array(corners) && _valid_plate_quad_array(corners)) {
-            plate_pts.resize(4);
-            for (int i = 0; i < 4; i++) plate_pts[i] = corners[i];
-            found = true;
-            break;
+            if (char_boxes.size() >= 2) {
+                cv::RotatedRect rr = cv::minAreaRect(char_points);
+                
+                float char_w = rr.size.width;
+                float char_h = rr.size.height;
+                float text_aspect = std::max(char_w, char_h) / std::max(std::min(char_w, char_h), 1.0f);
+                if (char_w < char_h) {
+                    text_aspect = char_h / std::max(char_w, 1.0f);
+                }
+
+                float scale_w = 1.25f;
+                float scale_h = 1.65f;
+                if (text_aspect <= 2.0f) {
+                    scale_w = 1.35f;
+                    scale_h = 1.25f;
+                }
+
+                cv::Point2f center = rr.center;
+                cv::Size2f expanded_size(rr.size.width * scale_w, rr.size.height * scale_h);
+                
+                expanded_size.width = std::min(expanded_size.width, (float)pw * 0.98f);
+                expanded_size.height = std::min(expanded_size.height, (float)ph * 0.98f);
+
+                cv::RotatedRect expanded_rr(center, expanded_size, rr.angle);
+                cv::Point2f corners[4];
+                expanded_rr.points(corners);
+
+                plate_pts.resize(4);
+                for (int i = 0; i < 4; ++i) {
+                    plate_pts[i].x = std::max(0.0f, std::min(corners[i].x, (float)pw - 1.0f));
+                    plate_pts[i].y = std::max(0.0f, std::min(corners[i].y, (float)ph - 1.0f));
+                }
+                found = true;
+            }
+        }
+    }
+
+    // ── Strategy 2: Otsu ──
+    cv::Mat thresh;
+    if (!found) {
+        cv::Mat blur_otsu;
+        cv::GaussianBlur(gray_padded, blur_otsu, cv::Size(3, 3), 0);
+        cv::threshold(blur_otsu, thresh, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+
+        // Check border white count to invert if needed
+        double border_sum = 0;
+        for (int x = 0; x < pw; x++) {
+            border_sum += thresh.at<uchar>(0, x) + thresh.at<uchar>(1, x);
+            border_sum += thresh.at<uchar>(ph - 1, x) + thresh.at<uchar>(ph - 2, x);
+        }
+        for (int y = 0; y < ph; y++) {
+            border_sum += thresh.at<uchar>(y, 0) + thresh.at<uchar>(y, 1);
+            border_sum += thresh.at<uchar>(y, pw - 1) + thresh.at<uchar>(y, pw - 2);
+        }
+        double total_border = (2 * pw * 2) + (2 * ph * 2);
+        if (border_sum / 255.0 > total_border * 0.5) {
+            cv::bitwise_not(thresh, thresh);
+        }
+
+        cv::Mat processed;
+        cv::morphologyEx(thresh, processed, cv::MORPH_OPEN, kernel);
+        cv::morphologyEx(processed, processed, cv::MORPH_CLOSE, kernel);
+
+        std::vector<std::vector<cv::Point>> cnts;
+        cv::findContours(processed, cnts, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        std::sort(cnts.begin(), cnts.end(), [](const auto& a, const auto& b) {
+            return cv::contourArea(a) > cv::contourArea(b);
+        });
+
+        for (const auto& cnt : cnts) {
+            double area = cv::contourArea(cnt);
+            if (area < min_area) break;
+            std::vector<cv::Point> hull;
+            cv::convexHull(cnt, hull);
+            double peri = cv::arcLength(hull, true);
+            const double eps_list[] = {0.02, 0.04, 0.06, 0.08, 0.10};
+            for (double eps : eps_list) {
+                std::vector<cv::Point> approx;
+                cv::approxPolyDP(hull, approx, eps * peri, true);
+                if (approx.size() == 4) {
+                    std::vector<cv::Point2f> pts(4);
+                    for (int i = 0; i < 4; i++) pts[i] = cv::Point2f(approx[i]);
+                    if (!is_border_quad(pts) && _valid_plate_quad_local(pts)) {
+                        plate_pts = pts;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (found) break;
+
+            // Fallback to minAreaRect for this Otsu contour
+            cv::RotatedRect rr = cv::minAreaRect(cnt);
+            cv::Point2f corners[4];
+            rr.points(corners);
+            if (!is_border_quad_array(corners) && _valid_plate_quad_array(corners)) {
+                plate_pts.resize(4);
+                for (int i = 0; i < 4; i++) plate_pts[i] = corners[i];
+                found = true;
+                break;
+            }
         }
     }
 
@@ -288,7 +368,7 @@ static bool find_plate_corners(const cv::Mat& gray_padded,
         cv::Canny(blur_canny, edges, 50, 150);
         cv::morphologyEx(edges, closed, cv::MORPH_CLOSE, kernel);
 
-        cnts.clear();
+        std::vector<std::vector<cv::Point>> cnts;
         cv::findContours(closed, cnts, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         std::sort(cnts.begin(), cnts.end(), [](const auto& a, const auto& b) {
             return cv::contourArea(a) > cv::contourArea(b);

@@ -1,9 +1,10 @@
 import os
 import re
 
-# Cho phép ép các luồng RTSP thành chất lượng thấp (LQ) dùng cho mục đích Testing (do lỗi ffmpeg phát sai FPS). 
-# Nếu cắm Camera thật, hãy đổi thành False.
-FORCE_LQ_RTSP = True
+# Ép RTSP về LQ (dùng khi test với ffmpeg phát sai FPS). False cho camera thật.
+# Override qua env var: FORCE_LQ_RTSP=1 hoặc FORCE_LQ_RTSP=0
+_force_lq_env = os.environ.get("FORCE_LQ_RTSP", "").strip().lower()
+FORCE_LQ_RTSP = True if _force_lq_env in ("1", "true", "yes") else (False if _force_lq_env in ("0", "false", "no") else False)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

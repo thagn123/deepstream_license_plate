@@ -105,13 +105,21 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
                 else:
                     vs.vehicle_bbox = _smooth_bbox(vs.vehicle_bbox, raw_v_bbox, lpr_state.bbox_smooth_alpha)
             vs.last_bbox_update_frame = frame_num
+            if lpr_state.debug_jsonl_path:
+                _debug_event("vehicle_bbox", {
+                    "frame_num": frame_num,
+                    "source_id": sid,
+                    "tracker_id": vid,
+                    "bbox_raw": raw_v_bbox,
+                    "bbox_smooth": vs.vehicle_bbox
+                })
 
         # ── Source Quality Assessment ─────────────────────────────────────────
         sid_str = f"stream{frame_meta.source_id}"
         stream_fps = lpr_state.perf_data.get_current_fps(sid_str)
         source_uri = lpr_state.source_uri_by_id.get(frame_meta.source_id, "")
         
-        is_forced_lq = config.FORCE_LQ_RTSP and "rtsp://" in source_uri
+        is_forced_lq = config.FORCE_LQ_RTSP
         c1 = is_forced_lq
         c2 = (0 < frame_meta.source_frame_width < 1280)
         c3 = (0 < frame_meta.source_frame_height < 720)
@@ -154,12 +162,6 @@ def metadata_src_pad_buffer_probe(pad, info, u_data):
 
             track_key = (sid, vid)
             
-            if vid == 434:
-                crop_img = _crop_plate_from_frame(frame_image, p.rect_params)
-                if crop_img is not None:
-                    os.makedirs("outputs/debug_434", exist_ok=True)
-                    cv2.imwrite(f"outputs/debug_434/plate_434_frame_{frame_num}.jpg", crop_img)
-
             _p_area = p.rect_params.width * p.rect_params.height
             if track_key not in frame_plate_seen or _p_area > frame_plate_seen[track_key][1]:
                 frame_plate_seen[track_key] = (p, _p_area)

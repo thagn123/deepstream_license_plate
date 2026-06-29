@@ -82,7 +82,7 @@ def _pgie_engine_path_for_batch(batch_size: int) -> str:
     prefix_part = engine_filename[:match.start()]
     suffix_part = engine_filename[match.end():]
 
-    preferred_batches = (1, 4, 8)
+    preferred_batches = (1, 4, 7, 8, 12, 16)
     for batch in preferred_batches:
         if requested <= batch:
             pref_filename = re.sub(r"_b\d+_", f"_b{batch}_", engine_filename)

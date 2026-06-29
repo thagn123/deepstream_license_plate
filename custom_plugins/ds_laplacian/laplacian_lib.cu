@@ -25,6 +25,13 @@ extern "C" void gpu_crop_and_resize_to_cpu(void* d_in_data, int pitch, int start
     crop_resize_kernel<<<gridSize, blockSize, 0, stream>>>((unsigned char*)d_in_data, pitch, start_x, start_y, crop_w, crop_h, out_managed_buf, out_w, out_h);
 }
 
+// Output vào GPU device memory (dùng cho pipeline OpenCV CUDA phía sau)
+extern "C" void gpu_crop_and_resize_device(void* d_in_data, int pitch, int start_x, int start_y, int crop_w, int crop_h, unsigned char* d_out_buf, int out_w, int out_h, cudaStream_t stream) {
+    dim3 blockSize(16, 16);
+    dim3 gridSize((out_w + blockSize.x - 1) / blockSize.x, (out_h + blockSize.y - 1) / blockSize.y);
+    crop_resize_kernel<<<gridSize, blockSize, 0, stream>>>((unsigned char*)d_in_data, pitch, start_x, start_y, crop_w, crop_h, d_out_buf, out_w, out_h);
+}
+
 // Kernel 2: Trải phẳng ảnh (Warp Perspective) và Tìm điểm Sáng/Tối nhất (MinMax)
 __global__ void warp_and_minmax_kernel(unsigned char* in_data, int pitch, int start_x, int start_y, int crop_w, int crop_h, float* m, unsigned char* warped_out, int out_w, int out_h, int* out_min, int* out_max) {
     int dx = blockIdx.x * blockDim.x + threadIdx.x;

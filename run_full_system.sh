@@ -76,7 +76,7 @@ docker exec -w /workspace/last_ds_cp ds90 env DISPLAY=:2 python3 /workspace/last
     --event-jsonl /outputs/events/events.jsonl \
     --save-event-frame \
     --min-stable-votes 2 \
-    --pgie-interval 0
+    --pgie-interval 1
 
 # Khi DeepStream chạy xong tự nhiên (không bấm Ctrl+C)
 echo "[INFO] Đang đóng hệ thống..."

@@ -59,72 +59,83 @@ def _plate_quality_score(text: str, conf: float, width: int, height: int, associ
     return max(0.0, score)
 
 
-def _square_join_variants(top: str, bot: str) -> list:
-    top = _normalize_plate_for_output(top)
-    bot = _normalize_plate_for_output(bot)
-    if not top and not bot:
-        return []
-
-    variants = []
-
-    def _push(value: str):
-        value = _correct_vn_plate(value)
-        if value and value not in variants:
-            variants.append(value)
-
-    _push(top + bot)
-
-    if len(top) >= 4 and len(bot) >= 4 and bot[0].isdigit():
-        province_series = top[:3]
-        if (
-            len(province_series) == 3
-            and province_series[:2].isdigit()
-            and province_series[2].isalpha()
-            and province_series[2] in config._VALID_SERIES
-        ):
-            _push(province_series + bot)
-
-    return variants
-
-
 def _correct_vn_plate(raw: str, is_moto: bool = False) -> str:
-    # ── Motorcycle & Car Plate Correction (2-line & CTC Collapse) ─────────────
-    # If raw has a hyphen (representing a 2-line plate), e.g. "89B0-712"
     if "-" in raw:
         parts = raw.split("-")
         if len(parts) == 2:
             top = re.sub(r'[^A-Z0-9]', '', parts[0].upper())
             bot = re.sub(r'[^A-Z0-9]', '', parts[1].upper())
-            
-            # Case 1: top is 2 digits + 1 letter + 1 digit (e.g. 89B0)
-            # and bot is exactly 3 digits (e.g. 712) -> suffix missing a digit (likely matching the series digit)
-            if (len(top) == 4 and len(bot) == 3 
+
+            bot_norm = "".join(
+                config._LETTER_TO_DIGIT.get(ch, ch) if not ch.isdigit() else ch
+                for ch in bot
+            )
+
+            # Case 1: top ends with series digit (e.g. 89B0), bot is 3 digits (712)
+            # → moto plate split across lines
+            if (len(top) == 4 and len(bot_norm) == 3
                     and top[:2].isdigit() and top[2].isalpha() and top[3].isdigit()
-                    and bot.isdigit()):
-                raw = f"{top}-{top[3]}{bot}"
-            
-            # Case 2: top is 2 digits + 1 letter (e.g. 89B) and bot is 4 digits starting with 0 (e.g. 0712)
-            # If it's a motorcycle, it must have a series digit. The leading 0 in bot is likely the series digit.
-            elif is_moto and len(top) == 3 and len(bot) == 4 and bot.startswith("0") and bot[1:].isdigit():
-                raw = f"{top}0-{bot}"
+                    and bot_norm.isdigit()):
+                raw = f"{top}-{top[3]}{bot_norm}"
+
+            # Case 2: moto 2-line — top=province+series (3 chars), bot=series_digit+number (4 chars).
+            # "89B-0712" → series digit=0, number=712 → "89B0-712"
+            elif (is_moto and len(top) == 3 and len(bot_norm) == 4
+                  and bot_norm[0].isdigit() and bot_norm[1:].isdigit()):
+                raw = f"{top}{bot_norm[0]}-{bot_norm[1:]}"
+
+            # Case 3: car 2-line — CTC collapsed one '0' from number group (007→07)
+            # "89B-0712" → "89B-00712"
+            elif (not is_moto and len(top) == 3 and len(bot_norm) == 4
+                  and top[:2].isdigit() and top[2].isalpha()
+                  and top[2] in config._VALID_SERIES
+                  and bot_norm.startswith("0") and bot_norm.isdigit()):
+                raw = f"{top}-0{bot_norm}"
 
     text = _normalize_plate_for_output(raw)
     if not text:
         return ""
 
-    # If it's a 1-line plate of length 7
+    # Pre-normalize suffix positions (letter→digit) so Rules below fire correctly
+    # even when OCR confuses e.g. T→7, I→1, D→0 in the number suffix.
+    # Guard: text[3] must not be a valid series letter (could be 2-letter series e.g. 29LD...).
+    def _prenorm_suffix(t: str, start: int) -> str:
+        fixed = list(t)
+        for i in range(start, len(fixed)):
+            if not fixed[i].isdigit():
+                fixed[i] = config._LETTER_TO_DIGIT.get(fixed[i], fixed[i])
+        return "".join(fixed)
+
+    if len(text) == 6 and is_moto and text[:2].isdigit() and text[2].isalpha():
+        text = _prenorm_suffix(text, 3)
+    elif (len(text) == 7 and text[:2].isdigit() and text[2].isalpha()
+            and text[3] not in config._VALID_SERIES):
+        text = _prenorm_suffix(text, 3)
+    elif len(text) == 8 and text[:2].isdigit() and text[2].isalpha() and text[3].isalpha():
+        text = _prenorm_suffix(text, 4)
+
+    # Rule 0: 6-char moto plate — CTC collapsed series digit with matching first number digit.
+    # E.g. OCR "89B012" from plate "89B0-012" (series digit 0 + number 012, 0,0 collapsed).
+    # Restore by duplicating text[3] (the surviving digit represents both collapsed chars).
+    if (len(text) == 6 and is_moto
+            and text[:2].isdigit() and text[2].isalpha()
+            and text[2] in config._VALID_SERIES
+            and text[3].isdigit() and text[4:].isdigit()):
+        text = text[:4] + text[3] + text[4:]
+
     if len(text) == 7:
-        # Rule A: If we know it's a motorcycle (starts with 2 digits + 1 letter + 1 digit (d) + 3 digits)
-        # We restore the collapsed series digit d into the suffix.
-        if is_moto and text[:2].isdigit() and text[2].isalpha() and text[3].isdigit() and text[4:].isdigit():
-            text = text[:4] + text[3] + text[4:]
-        
-        # Rule B: For cars or general case (starts with 2 digits + 1 letter + "0" + 3 digits)
-        # E.g. "89B0712" -> "89B00712" (car 89B-007.12)
+        # Rule A: moto — series digit was split from number group; plate is already correctly decoded.
+        # 7-char moto output means NO CTC collapse occurred — return as-is.
+        # The elif ensures Rule B (car) does not fire when is_moto=True.
+        if is_moto:
+            pass
+
+        # Rule B: car — leading '0' in suffix is CTC-collapsed from '00'.
+        # "89B0712" → "89B00712" (from plate 89B-007.12)
         elif text[:2].isdigit() and text[2].isalpha() and text[3] == "0" and text[4:].isdigit():
             text = text[:4] + "0" + text[4:]
 
-    # Rule C: 2-letter series car plate (e.g. "29LD0123" -> "29LD00123")
+    # Rule C: dual-series car plate "29LD0712" → "29LD00712"
     elif len(text) == 8:
         if text[:2].isdigit() and text[2:4].isalpha() and text[4] == "0" and text[5:].isdigit():
             text = text[:5] + "0" + text[5:]
@@ -218,18 +229,15 @@ def _should_replace_stable_text(current_text: str, current_score: float, current
     return enough_votes or clearly_better_shape or clearly_better_score
 
 
-def _is_valid_vn_plate_early(text: str, is_moto: bool = False) -> bool:
-    return _plate_pattern_score(_correct_vn_plate(text, is_moto=is_moto)) > 0.0
-
-
 def _stable_plate(track_key, raw_text: str, conf: float, width: int, height: int, assoc_score: float, is_moto: bool = False) -> str:
     if track_key not in state.plate_history:
         state.plate_history[track_key] = []
 
     hist = state.plate_history[track_key]
 
-    if len(hist) > 30:
-        hist = hist[-30:]
+    max_hist = config._PLATE_HISTORY_LEN * 2
+    if len(hist) > max_hist:
+        hist = hist[-max_hist:]
         state.plate_history[track_key] = hist
 
     if raw_text:
@@ -295,14 +303,3 @@ def _plate_history_stats(track_key, text: str, is_moto: bool = False) -> tuple:
     return votes, best
 
 
-def _normalize_plate_text(raw_text: str, is_moto: bool = False) -> str:
-    return _correct_vn_plate(raw_text, is_moto=is_moto)
-
-
-def _is_valid_vn_plate(text: str) -> bool:
-    if text.count('-') != 1:
-        return False
-    prefix, suffix = text.split('-')
-    if not (2 <= len(prefix) <= 5 and 3 <= len(suffix) <= 6):
-        return False
-    return True

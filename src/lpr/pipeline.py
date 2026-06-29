@@ -251,7 +251,10 @@ def run(args, *, probe_overrides=None, ocr_backend=None):
 
     pgie_cfg_path    = _runtime_config_path(config.PGIE_CONFIG_PATH, pgie_overrides)
     tracker_config   = _runtime_config_path(config.TRACKER_CONFIG_PATH)
-    sgie3_config     = _runtime_config_path(config.SGIE3_CONFIG_PATH, sgie3_overrides)
+    sgie3_config_path = config.SGIE3_CONFIG_PATH
+    if state.ocr_backend == "lprnet":
+        sgie3_config_path = os.path.join(config.PROJECT_ROOT, "configs", "config_sgie_lprnet.txt")
+    sgie3_config     = _runtime_config_path(sgie3_config_path, sgie3_overrides)
 
     print("=" * 60)
     print(" ds_lpr_v2 | PGIE all classes → Tracker → Plate OCR → Display")
@@ -505,20 +508,25 @@ def run(args, *, probe_overrides=None, ocr_backend=None):
 
     text_plate_tracks   = [k for k, vs in state.vehicle_states.items() if vs.best_plate_text_raw]
     stable_plate_tracks = [k for k, vs in state.vehicle_states.items() if vs.best_plate_text_stable]
-    print("[SUMMARY] tracked_objects={} plate_objects={} ocr_raw_events={} text_plate_tracks={} stable_plate_tracks={}".format(
+    print("[SUMMARY] tracked_objects={} plate_objects={} ocr_raw_events={} sgie3_inferences={} text_plate_tracks={} stable_plate_tracks={}".format(
         len(state.vehicle_states), state.metrics["plate_objects"], state.metrics["ocr_raw_events"],
-        len(text_plate_tracks), len(stable_plate_tracks)
+        state.metrics["sgie3_inferences"], len(text_plate_tracks), len(stable_plate_tracks)
     ))
     if state.debug_jsonl_path:
         try:
             with open(state.debug_jsonl_path, "a", encoding="utf-8") as f:
                 for (sid, oid), item in state.plate_text_seen.items():
+                    vs = state.vehicle_states.get((sid, oid))
+                    switches = vs.plate_text_switches if vs else 0
+                    p_bbox = list(vs.best_plate_bbox) if (vs and vs.best_plate_bbox) else [0, 0, 0, 0]
                     f.write(json.dumps({
                         "event": "final_plate_track",
                         "sid": int(sid),
                         "object_id": int(oid),
                         "plate": item.get("text", ""),
                         "stable": bool(item.get("stable")),
+                        "switches": int(switches),
+                        "plate_bbox": p_bbox,
                     }, ensure_ascii=True) + "\n")
         except Exception:
             pass

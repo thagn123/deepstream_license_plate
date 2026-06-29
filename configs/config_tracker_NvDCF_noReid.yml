@@ -5,11 +5,11 @@
 ################################################################################
 
 BaseConfig:
-  minDetectorConfidence: 0.12
+  minDetectorConfidence: 0.15
 
 TargetManagement:
   enableBboxUnClipping: 1
-  maxTargetsPerStream: 150
+  maxTargetsPerStream: 60
   minIouDiff4NewTarget: 0.35
 
 TrajectoryManagement:

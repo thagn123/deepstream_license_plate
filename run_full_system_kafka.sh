@@ -39,15 +39,14 @@ MONITOR_PID=$!
 
 echo "[5/5] DeepStream Pipeline... (Ctrl+C để dừng)"
 
-# Cho phép container kết nối X11 host (XWayland :0 → màn hình AMD)
-xhost +local: 2>/dev/null || true
-
 docker exec ds90 rm -rf /tmp/ds_lpr_v2_runtime_configs
 
-# DISPLAY=:0: kết nối vào XWayland của host (màn hình vật lý)
+# Khởi động NVIDIA Xorg :2 bên trong container (cần cho nveglglessink / NVIDIA EGL)
+docker exec ds90 /usr/local/bin/start-nvidia-display.sh
+
+# DISPLAY=:2: NVIDIA Xorg nội bộ container — đúng EGL path (DRI2), tránh Mesa fallback
 docker exec -w /workspace/last_ds_cp ds90 \
-    env DISPLAY=:0 \
-        USE_XIMAGESINK=1 \
+    env DISPLAY=:2 \
         GST_REGISTRY=/workspace/.gst_registry.bin \
     python3 /workspace/last_ds_cp/src/app_lpr_v2.py \
     rtsp://127.0.0.1:8554/drive-download-20260616T102510Z-3-001/lpr_230428_005 \
@@ -64,7 +63,7 @@ docker exec -w /workspace/last_ds_cp ds90 \
     --min-plate-height 4 \
     --save-event-frame \
     --min-stable-votes 2 \
-    --pgie-interval 0
+    --pgie-interval 1
 
 echo "[INFO] Đóng hệ thống..."
 kill $FORWARDER_PID $MONITOR_PID 2>/dev/null || true

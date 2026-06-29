@@ -41,13 +41,16 @@ def sgie3_sink_pad_buffer_probe_new(pad, info, u_data):
             if (obj_meta.class_id == config.LP_CLASS_ID
                     and obj_meta.unique_component_id == config.PGIE_UNIQUE_ID):
                 if obj_meta.object_id in state.locked_plate_ids:
-                    if frame_meta.frame_num % 5 != 0:
-                        obj_meta.class_id = 99
+                    if state.OCR_EVERY_N > 1:
+                        if frame_meta.frame_num % state.OCR_EVERY_N != 0:
+                            obj_meta.class_id = 99
                 else:
                     r = obj_meta.rect_params
                     state.plate_rects[(sid, obj_meta.object_id)] = (
                         r.left, r.top, r.width, r.height
                     )
+                if obj_meta.class_id == config.LP_CLASS_ID:
+                    state.metrics["sgie3_inferences"] += 1
 
             try:
                 l_obj = l_obj.next
