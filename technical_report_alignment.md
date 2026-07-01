@@ -31,8 +31,8 @@ graph TD
     J -->|Thất bại| L[Fallback: Scale tĩnh]
 ```
 
-### Kỹ thuật 1: Xử lý trên Độ phân giải Gốc (Native Resolution) & 30% Padding
-- **Padding:** Vùng cắt biển số từ GPU được mở rộng thêm 30% về mỗi phía nhằm đảm bảo toàn bộ đường viền của biển số nằm trọn vẹn bên trong ảnh crop, không bị cắt cụt.
+### Kỹ thuật 1: Xử lý trên Độ phân giải Gốc (Native Resolution) & 20% Padding
+- **Padding:** Vùng cắt biển số từ GPU được mở rộng thêm 20% về mỗi phía nhằm đảm bảo toàn bộ đường viền của biển số nằm trọn vẹn bên trong ảnh crop, không bị cắt cụt.
 - **Native Resolution Processing:** Thay vì resize ảnh crop lên kích thước cố định $300 \times 100$ gây răng cưa pixel, hệ thống giữ nguyên độ phân giải gốc của vùng cắt để tính toán. Điều này giúp bảo toàn chi tiết cạnh nguyên bản và tăng tốc độ xử lý CPU lên gấp nhiều lần do kích thước ma trận cần tính toán nhỏ đi đáng kể.
 
 ### Kỹ thuật 2: Phân ngưỡng Thích ứng Cục bộ (Adaptive Thresholding)

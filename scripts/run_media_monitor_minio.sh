@@ -28,6 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
 MINIO_ENDPOINT="${MINIO_ENDPOINT:-127.0.0.1:9000}"
+MINIO_PUBLIC_ENDPOINT="${MINIO_PUBLIC_ENDPOINT:-}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
 MINIO_BUCKET="${MINIO_BUCKET:-lpr-media}"
@@ -61,12 +62,18 @@ echo " Output : $OUTPUT_JSONL"
 echo " PathMap: $PATH_MAP"
 echo "============================================================"
 
+PUBLIC_ENDPOINT_FLAG=()
+if [ -n "$MINIO_PUBLIC_ENDPOINT" ]; then
+    PUBLIC_ENDPOINT_FLAG=(--minio-public-endpoint "$MINIO_PUBLIC_ENDPOINT")
+fi
+
 python3 tools/media_monitor.py \
     --events-jsonl  "$EVENTS_JSONL" \
     --output-jsonl  "$OUTPUT_JSONL" \
-    --replay \ 
+    --replay \
     --minio-enable \
     --minio-endpoint   "$MINIO_ENDPOINT" \
+    "${PUBLIC_ENDPOINT_FLAG[@]}" \
     --minio-access-key "$MINIO_ACCESS_KEY" \
     --minio-secret-key "$MINIO_SECRET_KEY" \
     --minio-bucket  "$MINIO_BUCKET" \
@@ -77,5 +84,4 @@ python3 tools/media_monitor.py \
     --media-result-kafka-topic     "$KAFKA_MEDIA_TOPIC" \
     --upload-retries 3 \
     --upload-retry-delay 2 \
-    --replay \
     "${ONCE_FLAG[@]}"

@@ -122,58 +122,72 @@ __global__ void stretch_blur_laplacian_kernel(unsigned char* warped_in, int out_
     }
 }
 
-extern "C" double gpu_warp_equalize_blur_laplacian(void* d_in_data, int pitch, int start_x, int start_y, int crop_w, int crop_h, float* Minv, int out_w, int out_h, cudaStream_t stream) {
-    if (out_w <= 4 || out_h <= 4) return 0.0;
+// Pre-allocated GPU buffer context definition moved to laplacian_lib.h
 
-    unsigned char* d_warped;
-    cudaMalloc(&d_warped, out_w * out_h);
+extern "C" LaplGpuCtx* lapl_gpu_ctx_create(int out_w, int out_h) {
+    LaplGpuCtx* ctx = new LaplGpuCtx();
+    cudaMalloc(&ctx->d_warped,  out_w * out_h);
+    cudaMalloc(&ctx->d_m,       9 * sizeof(float));
+    cudaMalloc(&ctx->d_sum,     sizeof(float));
+    cudaMalloc(&ctx->d_sq_sum,  sizeof(float));
+    cudaMalloc(&ctx->d_count,   sizeof(int));
+    cudaMalloc(&ctx->d_min,     sizeof(int));
+    cudaMalloc(&ctx->d_max,     sizeof(int));
+    cudaStreamCreate(&ctx->stream);
+    return ctx;
+}
 
-    float* d_m;
-    cudaMalloc(&d_m, 9 * sizeof(float));
-    cudaMemcpyAsync(d_m, Minv, 9 * sizeof(float), cudaMemcpyHostToDevice, stream);
+extern "C" void lapl_gpu_ctx_destroy(LaplGpuCtx* ctx) {
+    if (!ctx) return;
+    cudaFree(ctx->d_warped);
+    cudaFree(ctx->d_m);
+    cudaFree(ctx->d_sum);
+    cudaFree(ctx->d_sq_sum);
+    cudaFree(ctx->d_count);
+    cudaFree(ctx->d_min);
+    cudaFree(ctx->d_max);
+    cudaStreamDestroy(ctx->stream);
+    delete ctx;
+}
 
-    float *d_sum, *d_sq_sum;
-    int *d_count;
-    int *d_min, *d_max;
-    cudaMalloc(&d_min, sizeof(int));
-    cudaMalloc(&d_max, sizeof(int));
-    cudaMalloc(&d_sum, sizeof(float));
-    cudaMalloc(&d_sq_sum, sizeof(float));
-    cudaMalloc(&d_count, sizeof(int));
+extern "C" double gpu_warp_equalize_blur_laplacian_ctx(void* d_in_data, int pitch, int start_x, int start_y, int crop_w, int crop_h, float* Minv, int out_w, int out_h, LaplGpuCtx* ctx) {
+    if (out_w <= 4 || out_h <= 4 || !ctx) return 0.0;
+
+    cudaStream_t s = ctx->stream;
+
+    cudaMemcpyAsync(ctx->d_m,   Minv,     9 * sizeof(float), cudaMemcpyHostToDevice, s);
 
     int init_min = 255, init_max = 0;
-    cudaMemcpyAsync(d_min, &init_min, sizeof(int), cudaMemcpyHostToDevice, stream);
-    cudaMemcpyAsync(d_max, &init_max, sizeof(int), cudaMemcpyHostToDevice, stream);
-    cudaMemsetAsync(d_sum, 0, sizeof(float), stream);
-    cudaMemsetAsync(d_sq_sum, 0, sizeof(float), stream);
-    cudaMemsetAsync(d_count, 0, sizeof(int), stream);
+    cudaMemcpyAsync(ctx->d_min, &init_min, sizeof(int),   cudaMemcpyHostToDevice, s);
+    cudaMemcpyAsync(ctx->d_max, &init_max, sizeof(int),   cudaMemcpyHostToDevice, s);
+    cudaMemsetAsync(ctx->d_sum,    0, sizeof(float), s);
+    cudaMemsetAsync(ctx->d_sq_sum, 0, sizeof(float), s);
+    cudaMemsetAsync(ctx->d_count,  0, sizeof(int),   s);
 
     dim3 blockSize(16, 16);
     dim3 gridSize((out_w + blockSize.x - 1) / blockSize.x, (out_h + blockSize.y - 1) / blockSize.y);
 
-    warp_and_minmax_kernel<<<gridSize, blockSize, 0, stream>>>((unsigned char*)d_in_data, pitch, start_x, start_y, crop_w, crop_h, d_m, d_warped, out_w, out_h, d_min, d_max);
+    warp_and_minmax_kernel<<<gridSize, blockSize, 0, s>>>(
+        (unsigned char*)d_in_data, pitch, start_x, start_y, crop_w, crop_h,
+        ctx->d_m, ctx->d_warped, out_w, out_h, ctx->d_min, ctx->d_max);
 
     int h_min, h_max;
-    cudaMemcpyAsync(&h_min, d_min, sizeof(int), cudaMemcpyDeviceToHost, stream);
-    cudaMemcpyAsync(&h_max, d_max, sizeof(int), cudaMemcpyDeviceToHost, stream);
-    cudaStreamSynchronize(stream);
+    cudaMemcpyAsync(&h_min, ctx->d_min, sizeof(int), cudaMemcpyDeviceToHost, s);
+    cudaMemcpyAsync(&h_max, ctx->d_max, sizeof(int), cudaMemcpyDeviceToHost, s);
+    cudaStreamSynchronize(s);
 
-    stretch_blur_laplacian_kernel<<<gridSize, blockSize, 0, stream>>>(d_warped, out_w, out_h, h_min, h_max, d_sum, d_sq_sum, d_count);
+    stretch_blur_laplacian_kernel<<<gridSize, blockSize, 0, s>>>(
+        ctx->d_warped, out_w, out_h, h_min, h_max,
+        ctx->d_sum, ctx->d_sq_sum, ctx->d_count);
 
     float h_sum = 0, h_sq_sum = 0;
-    int h_count = 0;
-    cudaMemcpyAsync(&h_sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost, stream);
-    cudaMemcpyAsync(&h_sq_sum, d_sq_sum, sizeof(float), cudaMemcpyDeviceToHost, stream);
-    cudaMemcpyAsync(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost, stream);
-    cudaStreamSynchronize(stream);
+    int   h_count = 0;
+    cudaMemcpyAsync(&h_sum,    ctx->d_sum,    sizeof(float), cudaMemcpyDeviceToHost, s);
+    cudaMemcpyAsync(&h_sq_sum, ctx->d_sq_sum, sizeof(float), cudaMemcpyDeviceToHost, s);
+    cudaMemcpyAsync(&h_count,  ctx->d_count,  sizeof(int),   cudaMemcpyDeviceToHost, s);
+    cudaStreamSynchronize(s);
 
-    cudaFree(d_warped);
-    cudaFree(d_m);
-    cudaFree(d_min); cudaFree(d_max);
-    cudaFree(d_sum); cudaFree(d_sq_sum); cudaFree(d_count);
-
-    if (h_count == 0) { return 0.0; }
+    if (h_count == 0) return 0.0;
     double mean = h_sum / h_count;
-    double variance = (h_sq_sum / h_count) - (mean * mean);
-    return variance;
+    return (h_sq_sum / h_count) - (mean * mean);
 }

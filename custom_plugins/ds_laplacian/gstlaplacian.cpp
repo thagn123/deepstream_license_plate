@@ -27,6 +27,9 @@ enum { PROP_0, PROP_CLASS_ID };
 struct LaplCpuCtx {
 };
 
+// Forward declaration — full definition is in laplacian_lib.cu / laplacian_lib.h
+struct LaplGpuCtx;
+
 /* ══════════════════════════════════════════════════════════════════════
  * Forward declarations
  * ══════════════════════════════════════════════════════════════════════ */
@@ -83,6 +86,9 @@ gst_laplacian_init (GstLaplacian* laplacian)
 
     // CPU-accessible managed memory buffer 1000×500 (max crop resolution)
     cudaMallocManaged(&laplacian->cpu_detect_buf, 1000 * 500);
+
+    // Pre-allocate GPU warp buffers + create dedicated CUDA stream (once per plugin instance)
+    laplacian->gpu_ctx = lapl_gpu_ctx_create(OUT_W, OUT_H);
 }
 
 static void
@@ -97,6 +103,10 @@ gst_laplacian_finalize (GObject* object)
     if (laplacian->cpu_ctx) {
         delete static_cast<LaplCpuCtx*>(laplacian->cpu_ctx);
         laplacian->cpu_ctx = nullptr;
+    }
+    if (laplacian->gpu_ctx) {
+        lapl_gpu_ctx_destroy(static_cast<LaplGpuCtx*>(laplacian->gpu_ctx));
+        laplacian->gpu_ctx = nullptr;
     }
     G_OBJECT_CLASS (gst_laplacian_parent_class)->finalize (object);
 }
@@ -126,14 +136,18 @@ gst_laplacian_get_property (GObject* object, guint prop_id,
 /* ══════════════════════════════════════════════════════════════════════
  * Helper: sắp xếp 4 điểm → TL, TR, BR, BL
  * ══════════════════════════════════════════════════════════════════════ */
+// TL=min(x+y), BR=max(x+y), TR=max(x-y), BL=min(x-y) — robust for tilted plates
 static void sort_corners(std::vector<cv::Point2f>& pts)
 {
-    std::sort(pts.begin(), pts.end(),
-              [](const cv::Point2f& a, const cv::Point2f& b){ return a.x < b.x; });
-    cv::Point2f tl = pts[0].y < pts[1].y ? pts[0] : pts[1];
-    cv::Point2f bl = pts[0].y < pts[1].y ? pts[1] : pts[0];
-    cv::Point2f tr = pts[2].y < pts[3].y ? pts[2] : pts[3];
-    cv::Point2f br = pts[2].y < pts[3].y ? pts[3] : pts[2];
+    cv::Point2f tl = pts[0], tr = pts[0], br = pts[0], bl = pts[0];
+    float min_sum = 1e9f, max_sum = -1e9f, min_diff = 1e9f, max_diff = -1e9f;
+    for (const auto& p : pts) {
+        float s = p.x + p.y, d = p.x - p.y;
+        if (s < min_sum)  { min_sum  = s; tl = p; }
+        if (s > max_sum)  { max_sum  = s; br = p; }
+        if (d < min_diff) { min_diff = d; bl = p; }
+        if (d > max_diff) { max_diff = d; tr = p; }
+    }
     pts = {tl, tr, br, bl};
 }
 
@@ -361,7 +375,7 @@ static bool find_plate_corners(const cv::Mat& gray_padded,
         }
     }
 
-    // ── Strategy 2: Canny Contours ──
+    // ── Strategy 3: Canny Contours ──
     if (!found) {
         cv::Mat blur_canny, edges, closed;
         cv::GaussianBlur(gray_padded, blur_canny, cv::Size(3, 3), 0);
@@ -516,9 +530,9 @@ gst_laplacian_transform_ip (GstBaseTransform* btrans, GstBuffer* inbuf)
             if (cy + ch > img_height) ch = img_height - cy;
             if (cw <= 10 || ch <= 4) continue;
 
-            // Mở rộng bbox 30% mỗi phía
-            int pad_x = std::max(8,  (int)(cw * 0.30f));
-            int pad_y = std::max(6,  (int)(ch * 0.30f));
+            // Mở rộng bbox 20% mỗi phía
+            int pad_x = std::max(8,  (int)(cw * 0.20f));
+            int pad_y = std::max(6,  (int)(ch * 0.20f));
             int px    = std::max(0,  cx - pad_x);
             int py    = std::max(0,  cy - pad_y);
             int pw    = std::min(img_width  - px, cw + 2*pad_x);
@@ -528,22 +542,25 @@ gst_laplacian_transform_ip (GstBaseTransform* btrans, GstBuffer* inbuf)
             int copy_w = std::min(pw, 1000);
             int copy_h = std::min(ph, 500);
 
-            /* ── Bước 1: Crop padded region trên GPU -> cpu_detect_buf (Unified Memory) ở độ phân giải gốc ── */
-            gpu_crop_and_resize_to_cpu(d_y_plane, pitch, px, py, copy_w, copy_h,
-                                       laplacian->cpu_detect_buf, copy_w, copy_h, 0);
-            cudaStreamSynchronize(0); // Chờ GPU hoàn thành ghi vào Unified Memory
+            LaplGpuCtx* gctx = static_cast<LaplGpuCtx*>(laplacian->gpu_ctx);
 
-            /* ── Bước 2: CPU wrapping + Corner Detection ────────────── */
+            /* ── Bước 1: Crop padded region trên GPU -> cpu_detect_buf (Unified Memory) ── */
+            gpu_crop_and_resize_to_cpu(d_y_plane, pitch, px, py, copy_w, copy_h,
+                                       laplacian->cpu_detect_buf, copy_w, copy_h, gctx->stream);
+            cudaStreamSynchronize(gctx->stream); // Chờ GPU ghi xong Unified Memory
+
+            /* ── Bước 2: CPU Corner Detection ───────────────────────── */
             cv::Mat cpu_in(copy_h, copy_w, CV_8UC1, laplacian->cpu_detect_buf);
 
-            /* ── Bước 3: CPU Otsu / Canny / minAreaRect → Minv ─ */
+            /* ── Bước 3: CPU Otsu / Canny / minAreaRect → Minv ─────── */
             float Minv_ptr[9];
             find_plate_corners(cpu_in, Minv_ptr);
 
-            /* ── Bước 4: GPU warp + Laplacian variance ───────────────── */
-            double variance = gpu_warp_equalize_blur_laplacian(
-                d_y_plane, pitch, px, py, pw, ph,
-                Minv_ptr, OUT_W, OUT_H, 0);
+            /* ── Bước 4: GPU warp + Laplacian variance (pre-allocated buffers) ── */
+            // Dùng copy_w/copy_h (không phải pw/ph) vì Minv được tính trong không gian copy_w×copy_h
+            double variance = gpu_warp_equalize_blur_laplacian_ctx(
+                d_y_plane, pitch, px, py, copy_w, copy_h,
+                Minv_ptr, OUT_W, OUT_H, gctx);
 
             obj_meta->misc_obj_info[0] = (int)variance;
         }

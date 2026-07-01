@@ -86,10 +86,11 @@ def _minio_public_url(endpoint: str, secure: bool, bucket: str, key: str) -> str
 
 def _upload_file_minio(event_id: str, field: str, path: str,
                         minio_client, bucket: str, object_key: str,
-                        endpoint: str, secure: bool) -> dict:
+                        endpoint: str, secure: bool,
+                        public_endpoint: str = "") -> dict:
     try:
         minio_client.fput_object(bucket, object_key, path, content_type="image/jpeg")
-        url = _minio_public_url(endpoint, secure, bucket, object_key)
+        url = _minio_public_url(public_endpoint or endpoint, secure, bucket, object_key)
         return {"field": field, "path": path, "url": url, "status": "success", "error": "", "retry_count": 0}
     except FileNotFoundError:
         return {"field": field, "path": path, "url": "", "status": "failed",
@@ -191,6 +192,7 @@ def _process_event(event: dict, args, minio_client=None, path_map=None) -> dict:
                 return _upload_file_minio(
                     event_id, pk, p, minio_client,
                     args.minio_bucket, ok, args.minio_endpoint, args.minio_secure,
+                    public_endpoint=getattr(args, "minio_public_endpoint", "") or "",
                 )
 
             r = _upload_with_retry(_do_minio, args.upload_retries, args.upload_retry_delay)
@@ -305,7 +307,9 @@ def main():
     parser.add_argument("--minio-enable",     action="store_true",
                         help="Upload files to MinIO / S3-compatible store")
     parser.add_argument("--minio-endpoint",   default="localhost:9000",
-                        help="MinIO endpoint host:port (default: localhost:9000)")
+                        help="MinIO endpoint host:port for internal connection (default: localhost:9000)")
+    parser.add_argument("--minio-public-endpoint", default="",
+                        help="MinIO public host:port for generated image URLs (default: same as --minio-endpoint)")
     parser.add_argument("--minio-access-key", default="minioadmin")
     parser.add_argument("--minio-secret-key", default="minioadmin")
     parser.add_argument("--minio-bucket",     default="lpr-media",

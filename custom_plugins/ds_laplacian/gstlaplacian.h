@@ -23,12 +23,15 @@ struct _GstLaplacian
   GstBaseTransform base_trans;
   gint  class_id;
 
-  /* CPU-accessible managed buffer (DET_W × DET_H) — input cho pipeline OpenCV */
+  /* CPU-accessible managed buffer (max 1000×500) — input cho pipeline OpenCV */
   unsigned char* cpu_detect_buf;
 
   /* Flag + context cho CPU */
   gboolean cpu_initialized;
   void*    cpu_ctx;   /* trỏ tới LaplCpuCtx* (C++ only, khai báo trong .cpp) */
+
+  /* Pre-allocated GPU buffers + dedicated CUDA stream — tránh cudaMalloc mỗi frame */
+  void*    gpu_ctx;   /* trỏ tới LaplGpuCtx* (khai báo trong laplacian_lib.h) */
 };
 
 struct _GstLaplacianClass

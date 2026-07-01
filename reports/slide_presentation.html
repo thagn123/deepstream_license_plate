@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepStream LPR Pipeline - Slide Presentation</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Mermaid.js for Diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'dark',
+            securityLevel: 'loose',
+            themeVariables: {
+                background: '#111827',
+                primaryColor: '#059669',
+                primaryTextColor: '#f3f4f6',
+                lineColor: '#10b981',
+                textColor: '#e5e7eb'
+            }
+        });
+    </script>
+    <style>
+        :root {
+            --bg-main: #0B0C10;
+            --bg-card: rgba(26, 37, 48, 0.45);
+            --bg-sidebar: #121824;
+            --accent-primary: #10B981; /* Emerald green */
+            --accent-secondary: #06B6D4; /* Cyan */
+            --text-main: #F3F4F6;
+            --text-muted: #9CA3AF;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(16, 185, 129, 0.2);
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --sidebar-width: 280px;
+            --notes-height: 160px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+        }
+
+        /* Sidebar Navigation */
+        .sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            z-index: 100;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-header h2 {
+            font-family: var(--font-display);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sidebar-header h2 i {
+            color: var(--accent-primary);
+        }
+
+        .sidebar-menu {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 16px 8px;
+            list-style: none;
+        }
+
+        .sidebar-menu::-webkit-scrollbar {
+            width: 4px;
+        }
+        .sidebar-menu::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 2px;
+        }
+
+        .menu-item {
+            padding: 10px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .menu-item:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+            color: var(--text-main);
+        }
+
+        .menu-item.active {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: var(--accent-primary);
+            font-weight: 600;
+            border-left: 3px solid var(--accent-primary);
+            padding-left: 13px;
+        }
+
+        .menu-item .slide-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .menu-item.active .slide-num {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-primary);
+        }
+
+        /* Main Workspace */
+        .workspace {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            position: relative;
+            background-image: radial-gradient(circle at 10% 20%, rgba(16, 185, 129, 0.03) 0%, transparent 50%),
+                              radial-gradient(circle at 90% 80%, rgba(6, 182, 212, 0.03) 0%, transparent 50%);
+        }
+
+        /* Slide Viewport */
+        .slide-viewport {
+            flex-grow: 1;
+            position: relative;
+            overflow: hidden;
+            padding: 40px;
+        }
+
+        .slide {
+            position: absolute;
+            top: 40px;
+            left: 40px;
+            right: 40px;
+            bottom: 40px;
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.98) translateY(10px);
+            transition: opacity 0.4s ease, transform 0.4s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .slide.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1) translateY(0);
+        }
+
+        /* Slide Layout elements */
+        .slide-header {
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .slide-tag {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--accent-primary);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-family: var(--font-display);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .slide-title {
+            font-family: var(--font-display);
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #FFFFFF 0%, #D1D5DB 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-top: 10px;
+            letter-spacing: -0.5px;
+        }
+
+        .slide-body {
+            display: flex;
+            gap: 30px;
+            flex-grow: 1;
+            min-height: 0; /* Important for flex child overflow */
+        }
+
+        /* Slide Split Columns */
+        .content-col {
+            flex: 1.1;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .content-col::-webkit-scrollbar {
+            width: 4px;
+        }
+        .content-col::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.05);
+            border-radius: 2px;
+        }
+
+        .visual-col {
+            flex: 0.9;
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        /* Typography & Bullet list style */
+        .bullet-list {
+            list-style: none;
+        }
+
+        .bullet-list li {
+            position: relative;
+            padding-left: 28px;
+            margin-bottom: 18px;
+            font-size: 0.98rem;
+            line-height: 1.6;
+            color: #E5E7EB;
+        }
+
+        .bullet-list li strong {
+            color: #FFFFFF;
+            font-weight: 600;
+        }
+
+        .bullet-list li::before {
+            content: "\f054";
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            position: absolute;
+            left: 2px;
+            top: 3px;
+            color: var(--accent-primary);
+            font-size: 0.75rem;
+            transition: transform 0.2s ease;
+        }
+
+        .bullet-list li:hover::before {
+            transform: translateX(3px);
+            color: var(--accent-secondary);
+        }
+
+        .bullet-list li ul {
+            list-style: none;
+            margin-top: 8px;
+            margin-bottom: 4px;
+        }
+
+        .bullet-list li ul li {
+            font-size: 0.88rem;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+            padding-left: 20px;
+        }
+
+        .bullet-list li ul li::before {
+            content: "\f111";
+            font-size: 0.4rem;
+            top: 8px;
+            color: var(--text-muted);
+        }
+
+        /* Visual column content cards */
+        .visual-label {
+            position: absolute;
+            top: 14px;
+            left: 16px;
+            font-family: var(--font-display);
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .visual-label i {
+            color: var(--accent-secondary);
+        }
+
+        .visual-canvas {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: auto;
+        }
+
+        /* Custom tables for slides */
+        .slide-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin-top: 10px;
+        }
+
+        .slide-table th {
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+            color: var(--accent-primary);
+            font-weight: 600;
+            font-family: var(--font-display);
+        }
+
+        .slide-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-main);
+        }
+
+        .slide-table tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .slide-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        #diagram-slide3-detail svg {
+            max-width: none !important;
+            width: auto !important;
+            height: auto !important;
+        }
+
+        /* Title Slide Layout */
+        .slide.title-slide {
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .title-slide .slide-header {
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .title-slide-container {
+            max-width: 900px;
+            padding: 40px;
+            background: radial-gradient(circle at center, rgba(16, 185, 129, 0.05) 0%, transparent 70%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .title-slide h1 {
+            font-family: var(--font-display);
+            font-size: 3.2rem;
+            font-weight: 850;
+            line-height: 1.25;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #FFFFFF 0%, #A7F3D0 50%, #06B6D4 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        .title-slide p.subtitle {
+            font-size: 1.15rem;
+            color: var(--text-muted);
+            max-width: 700px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .title-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .title-meta span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .title-meta span i {
+            color: var(--accent-primary);
+        }
+
+        /* Bottom Control Bar */
+        .control-bar {
+            height: 60px;
+            border-top: 1px solid var(--border-color);
+            background-color: var(--bg-sidebar);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 101;
+            flex-shrink: 0;
+        }
+
+        .navigation-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-nav {
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-nav:hover:not(:disabled) {
+            background-color: rgba(16, 185, 129, 0.1);
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        .btn-nav:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .progress-indicator {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .utility-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-util {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-util:hover {
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.2);
+            background-color: rgba(255,255,255,0.02);
+        }
+
+        .btn-util.active {
+            background-color: rgba(16, 185, 129, 0.15);
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        /* Speaker Notes Panel */
+        .notes-panel {
+            height: var(--notes-height);
+            background-color: #0d121c;
+            border-top: 1px solid var(--border-color);
+            display: none;
+            flex-direction: column;
+            z-index: 99;
+            flex-shrink: 0;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+        }
+
+        .notes-panel.active {
+            display: flex;
+        }
+
+        .notes-header {
+            padding: 10px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: rgba(0,0,0,0.15);
+        }
+
+        .notes-header h3 {
+            font-family: var(--font-display);
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #F59E0B; /* Amber */
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .notes-body {
+            flex-grow: 1;
+            padding: 16px 24px;
+            overflow-y: auto;
+            font-size: 0.92rem;
+            line-height: 1.5;
+            color: #D1D5DB;
+        }
+
+        /* Text highlights */
+        .highlight-emerald {
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+        .highlight-cyan {
+            color: var(--accent-secondary);
+            font-weight: 600;
+        }
+        .highlight-amber {
+            color: #F59E0B;
+            font-weight: 600;
+        }
+
+        /* Graphics styling inside visual panel */
+        .box-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .g-card {
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            width: calc(50% - 6px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .g-card.highlighted {
+            border-color: rgba(16, 185, 129, 0.4);
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), transparent);
+        }
+
+        .g-card h4 {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .g-card p {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .g-card .unit {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        /* Slide transition helper classes */
+        .fade-in {
+            animation: fadeIn 0.3s forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.98); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        /* Print styles for PDF generation */
+        @media print {
+            .sidebar, .control-bar, .notes-panel, .visual-label {
+                display: none !important;
+            }
+            body {
+                overflow: visible !important;
+                height: auto !important;
+                background-color: #FFFFFF !important;
+                color: #000000 !important;
+            }
+            .workspace {
+                height: auto !important;
+                background: none !important;
+            }
+            .slide-viewport {
+                padding: 0 !important;
+            }
+            .slide {
+                position: relative !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                height: 100vh !important;
+                page-break-after: always !important;
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                transform: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                padding: 20px !important;
+                border: none !important;
+            }
+            .slide-body {
+                gap: 20px !important;
+            }
+            .visual-col {
+                background: #F3F4F6 !important;
+                border: 1px solid #D1D5DB !important;
+                color: #000000 !important;
+                box-shadow: none !important;
+            }
+            .bullet-list li {
+                color: #374151 !important;
+            }
+            .bullet-list li strong {
+                color: #000000 !important;
+            }
+            .slide-title {
+                background: none !important;
+                -webkit-text-fill-color: initial !important;
+                color: #000000 !important;
+            }
+            .slide-tag {
+                border-color: #D1D5DB !important;
+                color: #374151 !important;
+            }
+            .mermaid svg {
+                max-height: 350px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2><i class="fa-solid fa-microchip"></i> DeepStream LPR</h2>
+        </div>
+        <ul class="sidebar-menu" id="sidebarMenu">
+            <!-- Dynamically populated -->
+        </ul>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="workspace">
+        <div class="slide-viewport" id="slideViewport">
+            <!-- Slide 1 -->
+            <div class="slide title-slide active" data-category="TỔNG QUAN" data-title="Slide 1: Tiêu Đề Bài Thuyết Trình">
+                <div class="title-slide-container">
+                    <div class="slide-tag">AI System Architecture & Computer Vision</div>
+                    <h1>Hệ Thống Nhận Diện Biển Số Xe Real-time Hiệu Năng Cao Trên NVIDIA DeepStream SDK</h1>
+                    <p class="subtitle">Báo cáo kiến trúc công nghệ chuyên sâu, custom C++/CUDA plugin dslaplacian và kết quả đánh giá thực tế</p>
+                    <div class="title-meta">
+                        <span><i class="fa-solid fa-code-branch"></i> Version: 2.0</span>
+                        <span><i class="fa-solid fa-server"></i> NVIDIA DeepStream 9.0</span>
+                        <span><i class="fa-solid fa-microchip"></i> GPU Accelerated</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 2 -->
+            <div class="slide" data-category="TỔNG QUAN & KIẾN TRÚC" data-title="Slide 2: Kiến Trúc Pipeline GStreamer">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 1: Kiến trúc hệ thống</span>
+                    <h2 class="slide-title">Kiến Trúc Pipeline GStreamer Tổng Quát</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Xử lý Multi-Source đồng thời:</strong> Phần tử <code>uridecodebin</code> tự động gán bộ giải mã phần cứng NVDEC để đẩy luồng vào GPU VRAM dưới định dạng NV12.</li>
+                            <li><strong>Batching Tensor (nvstreammux):</strong> Gom N nguồn video, scale phần cứng qua CUDA về 1920×1080, tạo batch tensor đồng bộ gửi xuống PGIE.</li>
+                            <li><strong>Phát hiện & bám vết (PGIE + Tracker):</strong> YOLOv11s phát hiện xe/biển số, NvDCF tracker gán Object ID ổn định qua các frame.</li>
+                            <li><strong>Secondary Infer (SGIE3):</strong> Mô hình OCR New 2024 chỉ hoạt động trên bounding box của biển số được crop trực tiếp trong VRAM.</li>
+                            <li><strong>Metadata Probe (Python):</strong> Giải mã CTC, voting, lọc trùng và phát sự kiện đồng bộ trên luồng GStreamer.</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-diagram-project"></i> Sơ đồ luồng dữ liệu</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide2">
+                                graph TD
+                                    subgraph Host GPU VRAM
+                                        bin[uridecodebin NVDEC] -->|NV12| mux[nvstreammux 1080p]
+                                        mux -->|Batch NVMM| pgie[nvinfer PGIE YOLOv11s]
+                                        pgie --> tracker[nvtracker NvDCF]
+                                        tracker --> lap[dslaplacian C++/CUDA]
+                                        lap --> sgie[nvinfer SGIE3 OCR]
+                                        sgie --> conv[nvvideoconvert RGBA]
+                                    end
+                                    conv -->|RGBA NVMM| probe[Metadata Probe Python]
+                                    probe -->|JSON Event| kafka[Kafka Producer]
+                                    probe -->|BBox OSD| osd[nvdsosd Render]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 3 -->
+            <div class="slide" data-category="TỔNG QUAN & KIẾN TRÚC" data-title="Slide 3: Luồng Chi Tiết 1 Frame">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 1: Kiến trúc hệ thống</span>
+                    <h2 class="slide-title">Chu Trình Xử Lý Chi Tiết Của Một Frame</h2>
+                </div>
+                <div class="slide-body" style="flex-direction: column; gap: 15px;">
+                    <div class="visual-col" style="flex: 1; width: 100%; height: 100%; padding: 40px 20px 20px 20px;">
+                        <div class="visual-label"><i class="fa-solid fa-diagram-project"></i> Sơ đồ chu kỳ xử lý 1 frame trong Pipeline</div>
+                        <div class="visual-canvas" style="display: block; overflow: auto; text-align: center; padding: 20px 0;">
+                            <div class="mermaid" id="diagram-slide3-detail" style="width: 100%; height: auto; min-height: 600px;">
+                                graph TD
+                                    classDef pgie fill:#1e293b,stroke:#3b82f6,stroke-width:2px;
+                                    classDef tracker fill:#064e3b,stroke:#10b981,stroke-width:2px;
+                                    classDef laplacian fill:#1e1b4b,stroke:#6366f1,stroke-width:2px;
+                                    classDef sgie fill:#581c87,stroke:#a855f7,stroke-width:2px;
+                                    classDef meta fill:#701a75,stroke:#d946ef,stroke-width:2px;
+
+                                    Mux["1. nvstreammux<br/>(Frame N - 1920x1080 NVMM)"] --> PGIE["2. nvinfer PGIE<br/>(YOLOv11s Inference)"]
+                                    PGIE --> PGIE_Probe["3. PGIE Src Probe<br/>(Lọc đối tượng & Kích thước)"]
+                                    PGIE_Probe --> Tracker["4. nvtracker<br/>(Gán & Duy trì Object ID)"]
+                                    Tracker --> Laplacian["5. dslaplacian C++/CUDA<br/>(Đo Laplacian variance trên GPU)"]
+                                    Laplacian --> SGIE_Sink["6. SGIE3 Sink Probe<br/>(Cập nhật FPS & plate_rects)"]
+                                    SGIE_Sink --> SGIE["7. nvinfer SGIE3<br/>(Crop, Resize 64x128 & OCR Inference)"]
+                                    SGIE --> Convert["8. nvvideoconvert<br/>(NVMM NV12 -> RGBA)"]
+                                    Convert --> Caps["9. capsfilter<br/>(Áp format RGBA)"]
+                                    Caps --> Meta_Probe["10. Metadata Probe (Python)<br/>(Xử lý logic hạng nặng)"]
+                                    Meta_Probe --> Tiler["11. nvmultistreamtiler<br/>(Ghép nguồn)"]
+                                    Tiler --> OSD["12. nvdsosd<br/>(Vẽ BBox & Text)"]
+                                    OSD --> Sink["13. Sink<br/>(Display / File / Kafka)"]
+
+                                    class PGIE pgie;
+                                    class Tracker tracker;
+                                    class Laplacian laplacian;
+                                    class SGIE sgie;
+                                    class Meta_Probe meta;
+
+                                    %% Add detailed popups or sub-nodes connected to show details clearly
+                                    subgraph Detail_PGIE_Probe [Chi tiết PGIE Probe]
+                                        F1["- Loại bỏ: human, head, bike, cyclist, moto<br/>- Loại bỏ: xe W < 60px hoặc H < 40px"]
+                                    end
+                                    PGIE_Probe -.-> Detail_PGIE_Probe
+
+                                    subgraph Detail_SGIE [Chi tiết SGIE3 OCR]
+                                        O1["- Gộp batch tối đa 8 crops<br/>- TRT Inference [T=15, C=37] softmax<br/>- Ghi NvDsInferTensorMeta vào UserMeta"]
+                                    end
+                                    SGIE -.-> Detail_SGIE
+
+                                    subgraph Detail_Meta_Probe [Chi tiết Metadata Probe]
+                                        M1["- Smooth bbox xe/biển số (EMA, alpha=0.4)<br/>- Liên kết biển số vào xe (Geometry association)<br/>- CTC Decode & Chuẩn hóa chữ biển số VN<br/>- Điểm chất lượng & Tìm text ổn định (window 30)<br/>- OCR Lock (votes >= 3, score >= 4.0)<br/>- Anti-spam & Kafka Produce"]
+                                    end
+                                    Meta_Probe -.-> Detail_Meta_Probe
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 4 -->
+            <div class="slide" data-category="TỔNG QUAN & KIẾN TRÚC" data-title="Slide 4: Khâu Phát Hiện & Lọc Sơ Bộ">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 1: Kiến trúc hệ thống</span>
+                    <h2 class="slide-title">Khâu Phát Hiện (PGIE YOLOv11s) & Lọc Ban Đầu</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Mô hình phát hiện YOLOv11s:</strong> Định dạng TensorRT FP16, kích thước đầu vào 640×640. Độ tin cậy tối thiểu <code>pre-cluster-threshold=0.25</code>.</li>
+                            <li><strong>Custom Parser:</strong> Sử dụng thư viện liên kết động C++ <code>libnvds_infercustom_yolov11_flat.so</code> để phân tích tensor output phi tiêu chuẩn của YOLOv11.</li>
+                            <li><strong>Tầng lọc đồng bộ (PGIE Probe):</strong> Chạy trên pad SRC của PGIE trước khi vào tracker:
+                                <ul>
+                                    <li>Lọc bỏ các lớp đối tượng gây nhiễu: <code>human</code>, <code>head</code>, <code>bike</code>, <code>cyclist</code>...</li>
+                                    <li>Lọc kích thước tuyệt đối: Bỏ qua xe có W &lt; 60px hoặc H &lt; 40px.</li>
+                                    <li>Lọc tỷ lệ động (mới): Ngưỡng tự động co giãn theo độ phân giải muxer (vd: <code>width_ratio=0.031</code>, <code>height_ratio=0.037</code>).</li>
+                                </ul>
+                            </li>
+                            <li><strong>Ý nghĩa cốt lõi:</strong> Giảm tải bộ nhớ tracker, giảm tỉ lệ nhận diện sai và tối ưu hiệu năng OCR ở các tầng sau.</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-filter"></i> Phân loại & Lọc đối tượng</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide3">
+                                graph TD
+                                    A[Raw PGIE Detections] --> B{Lớp đối tượng?}
+                                    B -->|Xe / Biển số| C{Kích thước?}
+                                    B -->|Human / Head / Bike| Drop1[Xóa khỏi Metadata]
+                                    C -->|W >= 60px & H >= 40px| Keep[Đưa vào nvtracker]
+                                    C -->|Xe quá nhỏ / ở xa| Drop2[Xóa khỏi Metadata]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 5 -->
+            <div class="slide" data-category="TỔNG QUAN & KIẾN TRÚC" data-title="Slide 5: Theo Dõi Đối Tượng">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 1: Kiến trúc hệ thống</span>
+                    <h2 class="slide-title">Theo Dõi Đối Tượng (nvtracker - NvDCF)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Thuật toán NvDCF:</strong> NVIDIA Discriminative Correlation Filter. Cho hiệu năng bám vết chuyển động rất cao mà không cần Re-ID.</li>
+                            <li><strong>Cấu hình tối ưu:</strong> Tinh chỉnh kích thước bám đuổi <code>tracker-width=640</code>, <code>tracker-height=384</code> để cân bằng tốt nhất giữa độ chính xác và FPS.</li>
+                            <li><strong>Vai trò định danh duy nhất:</strong> Gán <code>object_id</code> (Track ID) bất biến cho từng chiếc xe và biển số trong suốt thời gian xuất hiện trên camera.</li>
+                            <li><strong>Logic liên kết trạng thái:</strong>
+                                <ul>
+                                    <li>Lịch sử bầu chọn OCR, trạng thái khóa, cờ emit sự kiện đều được key bằng cặp <code>(source_id, object_id)</code>.</li>
+                                    <li>Khi tracker bị đứt track hoặc xe rời khỏi tầm nhìn, hệ thống tự động gọi hàm cleanup để giải phóng bộ nhớ, tránh memory leak.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-id-card"></i> Cơ chế gán định danh duy nhất</div>
+                        <div class="box-container" style="margin-top: 20px;">
+                            <div class="g-card highlighted">
+                                <h4>Thuật toán Tracker</h4>
+                                <p>NvDCF</p>
+                                <span class="unit">Correlation Filter</span>
+                            </div>
+                            <div class="g-card">
+                                <h4>Kích thước xử lý</h4>
+                                <p>640 × 384</p>
+                                <span class="unit">Resolution</span>
+                            </div>
+                            <div class="g-card">
+                                <h4>Khóa định danh</h4>
+                                <p>Unique ID</p>
+                                <span class="unit">per Source / Frame</span>
+                            </div>
+                            <div class="g-card">
+                                <h4>Quản lý bộ nhớ</h4>
+                                <p>Auto Clean</p>
+                                <span class="unit">on Lost Track</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 6 -->
+            <div class="slide" data-category="ĐỘT PHÁ CÔNG NGHỆ" data-title="Slide 6: Giới Thiệu Custom Plugin dslaplacian">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 2: Đột phá công nghệ</span>
+                    <h2 class="slide-title">Custom GStreamer Plugin "dslaplacian" (C++/CUDA)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Mục tiêu:</strong> Bộ lọc phần cứng tích hợp đo độ nét biển số trực tiếp trên VRAM. Loại bỏ biển số mờ do xe ở xa hoặc chuyển động nhanh trước khi nạp vào SGIE3 OCR.</li>
+                            <li><strong>Kiến trúc Hybrid CPU-GPU:</strong>
+                                <ul>
+                                    <li><strong>GPU:</strong> Trích xuất vùng bounding box biển số (chỉ khoảng 150×50px) từ frame Full HD trong VRAM.</li>
+                                    <li><strong>Unified Memory (cudaMallocManaged):</strong> Vùng nhớ ánh xạ dùng chung giữa host (CPU) và device (GPU). Giúp CPU đọc trực tiếp ảnh crop mà không cần copy qua PCIe.</li>
+                                    <li><strong>CPU:</strong> Dò góc nghiêng và tìm 4 góc biển số ở độ phân giải gốc cực nhanh.</li>
+                                    <li><strong>GPU:</strong> Nhận ma trận góc xoay ngược để tiến hành Warp, Cân bằng sáng, Khử nhiễu và đo độ nét.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Giao tiếp kết quả:</strong> Điểm số Laplacian được ghi trực tiếp vào trường <code>misc_obj_info[0]</code> trong metadata của đối tượng biển số.</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-bolt"></i> Kiến trúc Hybrid CPU-GPU</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide5">
+                                graph TD
+                                    VRAM[VRAM NVMM Frame 1080p] -->|GPU: Crop BBox| UM[Unified Memory cudaMallocManaged]
+                                    UM -->|CPU: Đọc trực tiếp| CPU[Dò góc nghiêng & Tìm 4 góc]
+                                    CPU -->|Tính ma trận M_inv| GPU[GPU: Warp Perspective]
+                                    GPU -->|GPU: 1-Pass Kernel| LAP[Độ nét Laplacian Score]
+                                    LAP -->|Ghi đè| Meta[misc_obj_info 0 Metadata]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 7 -->
+            <div class="slide" data-category="ĐỘT PHÁ CÔNG NGHỆ" data-title="Slide 7: Thách Thức Bumper Leakage">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 2: Đột phá công nghệ</span>
+                    <h2 class="slide-title">Vấn Đề "Bumper Leakage" & Mờ Răng Cưa</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Hiện tượng Bumper Leakage (Rò rỉ cản xe):</strong> 
+                                <ul>
+                                    <li>Biển số lắp rất sát cản xe có độ sáng/tương phản cao.</li>
+                                    <li>Các thuật toán phân ngưỡng toàn cục truyền thống (như Otsu ngoại, Canny ngoại) bị "rò rỉ" nét viền ra ngoài cản xe.</li>
+                                    <li>Hộp bao <code>minAreaRect</code> bị méo lệch, dẫn đến ảnh crop bị cắt mất góc, mất chữ số, gây hỏng OCR.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Sự cố mờ răng cưa do Resize (Interpolation Blur):</strong>
+                                <ul>
+                                    <li>Thuật toán cũ phóng to ảnh crop nhỏ bằng nội suy (bilinear) làm nhòe viền ký tự nhân tạo.</li>
+                                    <li>Làm sai lệch điểm số Laplacian variance thực tế, lọc nhầm biển nét thành biển mờ.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col" style="padding: 40px 20px 20px 20px;">
+                        <div class="visual-label"><i class="fa-solid fa-triangle-exclamation"></i> Lỗi thuật toán truyền thống & Minh họa</div>
+                        <div class="visual-canvas" style="display: flex; gap: 20px; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                            <div style="flex: 1.1; width: 100%;">
+                                <div class="box-container">
+                                    <div class="g-card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.02); width: calc(50% - 6px);">
+                                        <h4>Phân ngưỡng toàn cục</h4>
+                                        <p style="color: #ef4444;">Bumper Leakage</p>
+                                        <span class="unit">Dính viền cản xe</span>
+                                    </div>
+                                    <div class="g-card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.02); width: calc(50% - 6px);">
+                                        <h4>Tìm viền ngoài biển</h4>
+                                        <p style="color: #ef4444;">Lệch BBox</p>
+                                        <span class="unit">Mất góc / Mất chữ</span>
+                                    </div>
+                                    <div class="g-card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.02); width: calc(50% - 6px);">
+                                        <h4>Bilinear Resize</h4>
+                                        <p style="color: #ef4444;">Interpolation Blur</p>
+                                        <span class="unit">Mờ răng cưa</span>
+                                    </div>
+                                    <div class="g-card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.02); width: calc(50% - 6px);">
+                                        <h4>Hệ quả</h4>
+                                        <p style="color: #ef4444;">Fail OCR</p>
+                                        <span class="unit">Lọc sai độ nét</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="flex: 0.9; display: flex; justify-content: center; align-items: center;">
+                                <img src="bumper_leakage.png" alt="Bumper Leakage" class="slide-image">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 8 -->
+            <div class="slide" data-category="ĐỘT PHÁ CÔNG NGHỆ" data-title="Slide 8: Giải Pháp Định Vị Ký Tự">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 2: Đột phá công nghệ</span>
+                    <h2 class="slide-title">Giải Pháp Đột Phá "Định Vị Ký Tự" (char_est)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Triết lý mới:</strong> Không đi tìm viền ngoài biển số. Tập trung định vị các ký tự bên trong biển số và nhân rộng theo tỷ lệ khung hình chuẩn.</li>
+                            <li><strong>Quy trình thuật toán <code>char_est</code>:</strong>
+                                <ul>
+                                    <li><strong>Adaptive Threshold:</strong> Chạy phân ngưỡng thích ứng cục bộ ($11 \times 11$, hằng số $C = 2$) để bóc tách rõ nét các ký tự đen trên nền trắng bất kể cản xe sáng/tối.</li>
+                                    <li><strong>Tìm & Lọc contour chữ (RETR_CCOMP):</strong> Lọc các contour ký tự thực sự dựa trên heuristic kích thước: chiều cao ($15\%-85\%$), chiều rộng ($2\%-35\%$), tỷ lệ khung hình ($0.5-6.0$), độ đặc ($solidity > 0.15$).</li>
+                                    <li><strong>minAreaRect lõi chữ:</strong> Gom toàn bộ pixel của các chữ số hợp lệ ($\ge 2$ ký tự) để tìm hộp bao nghiêng tối thiểu.</li>
+                                    <li><strong>Mở rộng tỷ lệ chuẩn (Aspect Ratio Scaling):</strong>
+                                        <ul>
+                                            <li>Biển dài (Aspect ratio lõi chữ &gt; 2.0): rộng $\times 1.25$, cao $\times 1.65$.</li>
+                                            <li>Biển vuông (Aspect ratio lõi chữ &le; 2.0): rộng $\times 1.35$, cao $\times 1.25$.</li>
+                                        </ul>
+                                    </li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col" style="padding: 40px 20px 20px 20px;">
+                        <div class="visual-label"><i class="fa-solid fa-crop-simple"></i> Quy trình định vị ký tự & Minh họa</div>
+                        <div class="visual-canvas" style="display: flex; gap: 20px; align-items: center; justify-content: center; width: 100%; height: 100%; overflow: hidden;">
+                            <div style="flex: 0.9; width: 100%; height: 100%; overflow: auto; display: flex; align-items: center; justify-content: center;">
+                                <div class="mermaid" id="diagram-slide7">
+                                    graph TD
+                                        In[Padded Crop gốc] --> Adap[Adaptive Threshold 11x11]
+                                        Adap --> Cont[Contour RETR_CCOMP]
+                                        Cont --> Filt[Lọc Heuristic Ký tự]
+                                        Filt --> minArea[minAreaRect cụm chữ]
+                                        minArea --> Scale{Tỉ lệ Aspect?}
+                                        Scale -->|Biển dài| Long[Mở rộng rộng x1.25 / cao x1.65]
+                                        Scale -->|Biển vuông| Square[Mở rộng rộng x1.35 / cao x1.25]
+                                        Long --> Out[4 góc biển số chuẩn]
+                                        Square --> Out
+                                </div>
+                            </div>
+                            <div style="flex: 1.1; display: flex; justify-content: center; align-items: center;">
+                                <img src="character_alignment.png" alt="Character-Based Plate Alignment" class="slide-image">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 9 -->
+            <div class="slide" data-category="ĐỘT PHÁ CÔNG NGHỆ" data-title="Slide 9: Cơ Chế Dự Phòng Đa Tầng">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 2: Đột phá công nghệ</span>
+                    <h2 class="slide-title">Cơ Chế Dự Phòng Đa Tầng (Robust Fallback Stack)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Mục đích:</strong> Đảm bảo pipeline GStreamer chạy liên tục không bị gián đoạn, luôn trả về ảnh crop biển số tốt nhất kể cả khi biển số bị mờ tịt hoặc che khuất.</li>
+                            <li><strong>Sơ đồ quyết định 5 tầng fallback:</strong>
+                                <ol>
+                                    <li><strong>Tầng 1 (char_est):</strong> Tìm góc xoay dựa trên lõi ký tự (yêu cầu tìm thấy $\ge 2$ ký tự).</li>
+                                    <li><strong>Tầng 2 (Otsu Contour):</strong> Gaussian blur -> Phân ngưỡng Otsu toàn cục -> Morphology đóng hình học -> approxPolyDP lấy 4 góc hoặc minAreaRect của contour lớn nhất.</li>
+                                    <li><strong>Tầng 3 (Canny Contours):</strong> Dò cạnh Canny -> Đóng viền cạnh ->approxPolyDP tìm góc lồi hoặc minAreaRect.</li>
+                                    <li><strong>Tầng 4 (Canny minAreaRect toàn phần):</strong> Vẽ minAreaRect bao phủ toàn bộ pixel cạnh Canny tìm được trong ảnh.</li>
+                                    <li><strong>Tầng 5 (Scale tĩnh):</strong> Trả về ma trận scale thuần túy không xoay dựa trên bbox gốc của PGIE.</li>
+                                </ol>
+                            </li>
+                            <li><strong>Bộ lọc an toàn quad:</strong> <code>border_check</code> loại bỏ quad chạm viền ảnh $\ge 3$ góc và <code>valid_plate_quad</code> kiểm soát aspect ratio hợp lệ từ 1.0 đến 7.5.</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-shield-halved"></i> 5 Cấp độ dự phòng quyết định</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide8">
+                                graph TD
+                                    Start[Ảnh Crop padded] --> C1{Số chữ số >= 2?}
+                                    C1 -->|Có| S1[Tầng 1: char_est]
+                                    C1 -->|Không| C2{Có viền Otsu hợp lệ?}
+                                    C2 -->|Có| S2[Tầng 2: otsu / otsu_minar]
+                                    C2 -->|Không| C3{Có viền Canny hợp lệ?}
+                                    C3 -->|Có| S3[Tầng 3: contour / minar]
+                                    C3 -->|Không| C4{Có hộp nghiêng Canny?}
+                                    C4 -->|Có| S4[Tầng 4: minar toàn phần]
+                                    C4 -->|Không| S5[Tầng 5: Scale tĩnh không xoay]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 10 -->
+            <div class="slide" data-category="ĐỘT PHÁ CÔNG NGHỆ" data-title="Slide 10: Tối Ưu Hóa GPU CUDA Kernel">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 2: Đột phá công nghệ</span>
+                    <h2 class="slide-title">Tối Ưu Hóa GPU CUDA Kernel (1-Pass Fused Kernel)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Vấn đề:</strong> Chạy 4 kernel xử lý ảnh song song (Warp -> Equalize -> Blur -> Laplacian) gây nghẽn băng thông memory GPU VRAM do liên tục đọc/ghi Global Memory.</li>
+                            <li><strong>Giải pháp Fused Kernel (gộp kernel):</strong>
+                                <ul>
+                                    <li><strong>Kernel 1 (Warp & Min/Max):</strong> Warp Perspective nắn thẳng ảnh và dùng <code>atomicMin</code>/<code>atomicMax</code> tìm giá trị Min/Max của pixel để phục vụ contrast stretch.</li>
+                                    <li><strong>Kernel 2 (Stretch + Blur + Laplacian):</strong> Thực hiện 3 phép toán trong <strong>đúng 1 lần duyệt (1-Pass)</strong>:
+                                        <ol>
+                                            <li><i>Contrast Stretching:</i> Cân bằng tương phản tự động.</li>
+                                            <li><i>Gaussian Blur 3x3:</i> Khử nhiễu nén video.</li>
+                                            <li><i>Laplacian Variance:</i> Tính tổng bình phương vi sai của Laplacian để đo độ nét.</li>
+                                        </ol>
+                                    </li>
+                                </ul>
+                            </li>
+                            <li><strong>Hiệu quả:</strong> Giảm tối đa thao tác đọc/ghi VRAM nhờ cache dữ liệu trung gian vào bộ nhớ cache L1 cực nhanh của GPU (kích thước ảnh crop nhỏ ~7.5KB).</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-microchip"></i> So sánh luồng xử lý GPU</div>
+                        <div class="box-container" style="margin-top: 10px;">
+                            <div class="g-card" style="width: 100%; border-color: rgba(239, 68, 68, 0.3); margin-bottom: 8px;">
+                                <h4>Cách cũ: Multi-Pass (Nhiều kernel)</h4>
+                                <p style="font-size: 1.1rem; color: #ef4444;">Warp (VRAM) ➔ Stretch (VRAM) ➔ Blur (VRAM) ➔ Laplacian (VRAM)</p>
+                                <span class="unit">Nghẽn băng thông do đọc ghi Global Memory liên tục</span>
+                            </div>
+                            <div class="g-card highlighted" style="width: 100%;">
+                                <h4>Cách mới: Fused Kernel (1-Pass)</h4>
+                                <p style="font-size: 1.1rem; color: var(--accent-primary);">Kernel 1: Warp & Min/Max ➔ Kernel 2: Stretch + Blur + Laplacian (Fused L1 Cache)</p>
+                                <span class="unit">Tối ưu hóa phần cứng, tiết kiệm 70% băng thông VRAM</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 11 -->
+            <div class="slide" data-category="NHẬN DIỆN KÝ TỰ & METADATA" data-title="Slide 11: Tầng Nhận Diện OCR">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 3: Nhận diện ký tự & xử lý Metadata</span>
+                    <h2 class="slide-title">Tầng Nhận Diện OCR (SGIE3 nvinfer)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Mô hình New OCR 2024:</strong> Tập tin <code>lpr_ocr.20240305.onnx</code>, tối ưu hóa sang TensorRT FP16, batch-size = 8.</li>
+                            <li><strong>Thông số Tensor đầu vào:</strong> Kích thước $3 \times 64 \times 128$ định dạng màu BGR. Model tự động thực hiện chuẩn hóa ImageNet nội bộ.</li>
+                            <li><strong>Kiến trúc Vocab 37 class:</strong> 10 chữ số, 25 chữ cái (không có chữ O tránh nhầm với số 0) và ký tự đặc biệt <code>_</code> (phân tách dòng).</li>
+                            <li><strong>Xử lý biển vuông trực tiếp (Đột phá):</strong>
+                                <ul>
+                                    <li>Mô hình được train để trả về ký tự <code>_</code> làm dấu phân cách dòng khi gặp biển vuông 2 dòng (ví dụ: input biển vuông "51A / 12345" -> output: "51A_12345").</li>
+                                    <li>Loại bỏ hoàn toàn khâu cắt biển vuông thành 2 dòng (top/bot) dạng pseudo-object phức tạp của mô hình cũ LPRNet.</li>
+                                    <li>Giúp giảm 1 nửa số lượng inference và đơn giản hóa pipeline GStreamer.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-magnifying-glass-chart"></i> So sánh mô hình OCR</div>
+                        <table class="slide-table">
+                            <thead>
+                                <tr>
+                                    <th>Tiêu chí</th>
+                                    <th>LPRNet (Cũ)</th>
+                                    <th>New OCR 2024 (Hiện tại)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Đầu vào</td>
+                                    <td>3×48×96 (RGB)</td>
+                                    <td class="highlight-emerald">3×64×128 (BGR)</td>
+                                </tr>
+                                <tr>
+                                    <td>Xử lý biển vuông</td>
+                                    <td>Cắt dòng top/bot phức tạp</td>
+                                    <td class="highlight-emerald">Tự nhận diện qua token "_"</td>
+                                </tr>
+                                <tr>
+                                    <td>Biển VN hợp lệ</td>
+                                    <td>88.5%</td>
+                                    <td class="highlight-emerald">100%</td>
+                                </tr>
+                                <tr>
+                                    <td>Events phát (15 video)</td>
+                                    <td>131</td>
+                                    <td class="highlight-emerald">169 (+29%)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 12 -->
+            <div class="slide" data-category="NHẬN DIỆN KÝ TỰ & METADATA" data-title="Slide 12: Giải Mã OCR CTC">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 3: Nhận diện ký tự & xử lý Metadata</span>
+                    <h2 class="slide-title">Giải Mã OCR CTC & Chuẩn Hóa Biển Số Việt Nam</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Greedy CTC Decoding:</strong> Phân tích tensor output softmax kích thước <code>[T=15, C=37]</code>:
+                                <ul>
+                                    <li>Lấy <code>argmax</code> tại mỗi time step.</li>
+                                    <li>Gộp các ký tự lặp liên tiếp và loại bỏ ký tự trống (CTC blank).</li>
+                                    <li>Đổi ký tự <code>_</code> phân dòng thành dấu gạch ngang <code>-</code>.</li>
+                                    <li>Độ tin cậy (Confidence) = trung bình cộng điểm softmax của các ký tự được giữ lại.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Sửa lỗi ký tự theo quy chuẩn VN (`_correct_vn_plate`):</strong>
+                                <ul>
+                                    <li>Dựa vào cấu trúc cứng của biển số Việt Nam: <code>[tỉnh][chữ series][số suffix]</code>.</li>
+                                    <li>Tự động sửa lỗi nhầm lẫn OCR: số sang chữ (vd: <code>0➔D</code>, <code>1➔K</code> ở vị trí mã tỉnh) hoặc chữ sang số (vd: <code>B➔8</code>, <code>S➔5</code> ở phần số).</li>
+                                </ul>
+                            </li>
+                            <li><strong>Chấm điểm định dạng (`_plate_pattern_score`):</strong> Cộng điểm dựa trên độ dài và độ chính xác format (biển đúng format đạt score $\ge 5.0$).</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-code"></i> Giải mã và Sửa lỗi OCR</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide11">
+                                graph LR
+                                    Softmax[Tensor 15x37] -->|Greedy CTC| RawStr[Chuỗi thô: 51A_12345]
+                                    RawStr -->|Thay '_' bằng '-'| NormalStr[51A-12345]
+                                    NormalStr -->|Sửa lỗi ký tự VN| Correct[51A12345]
+                                    Correct -->|Đo khớp Pattern| Score{Score >= 5.0?}
+                                    Score -->|Đúng| Valid[Hợp lệ: Đưa vào Voting]
+                                    Score -->|Sai| Reject[Loại bỏ nhiễu]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 13 -->
+            <div class="slide" data-category="NHẬN DIỆN KÝ TỰ & METADATA" data-title="Slide 13: Quản Lý Trạng Thái & Cơ Chế Phát Sự Kiện">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 3: Nhận diện ký tự & xử lý Metadata</span>
+                    <h2 class="slide-title">Quản Lý Trạng Thái & Phát Sự Kiện (Event Emission)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Voting Sliding Window (30 readings):</strong> Lưu 30 kết quả đọc OCR gần nhất per-vehicle. Gom cụm các kết quả có khoảng cách chỉnh sửa Levenshtein $\le 1$ để hấp thụ lỗi OCR nhỏ.</li>
+                            <li><strong>Điều kiện ghi đè kết quả đã ổn định (`_should_replace_stable_text`):</strong>
+                                <ul>
+                                    <li>Cho phép tinh chỉnh kết quả tốt hơn khi xe tiến gần camera (score ảnh tăng).</li>
+                                    <li>Tích hợp cổng <strong>Anti-Jitter</strong> chống nhảy chữ do nhiễu: Nếu kết quả mới khác biệt lớn (khác tỉnh), yêu cầu điểm vượt trội hẳn ($\ge 2.25$) và số vote vượt trội ($\ge 4$) mới cho ghi đè.</li>
+                                </ul>
+                            </li>
+                            <li><strong>OCR Lock (Khóa biển):</strong> Kích hoạt khi đạt $\ge 3$ votes đồng thuận và score $\ge 4.0$.</li>
+                            <li><strong>Vehicle-Plate Association (Liên kết Xe-Biển):</strong>
+                                <ul>
+                                    <li>Ưu tiên quan hệ cha-con (parent link) từ DeepStream tracker.</li>
+                                    <li>Dự phòng bằng thuật toán hình học: tìm xe chứa tâm biển số, ưu tiên nửa dưới của xe.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Anti-Spam:</strong> Chỉ phát duy nhất 1 sự kiện JSON kèm ảnh crop của xe và biển số lên Kafka/MinIO.</li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-envelope-open-text"></i> Vòng đời sự kiện của 1 xe</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide12">
+                                graph TD
+                                    Start[Xe xuất hiện] --> Vote[Tích lũy votes OCR]
+                                    Vote --> Lock{Votes >= 3 & Score >= 4.0?}
+                                    Lock -->|Có| Locked[Khóa biển số: locked_plate_ids]
+                                    Locked --> Emit{Chưa emit lần nào?}
+                                    Emit -->|Đúng| Send[Gửi Kafka & Crop ảnh]
+                                    Emit -->|Sai| Override{Biển mới tốt hơn rõ rệt?}
+                                    Override -->|Có| Update[Cập nhật & Ghi đè]
+                                    Override -->|Không| Ignore[Bỏ qua, tránh spam]
+                                    Send --> KeepTracking[Vẫn tiếp tục track & smooth bbox]
+                                    Update --> KeepTracking
+                                    KeepTracking --> Lost[Tracker mất dấu xe]
+                                    Lost --> Cleanup[Dọn dẹp bộ nhớ]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 14 -->
+            <div class="slide" data-category="TỐI ƯU HÓA HIỆU NĂNG" data-title="Slide 14: Giải Quyết Các Điểm Nghẽn Hiệu Năng">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 4: Tối ưu hóa hiệu năng & kết quả thực tế</span>
+                    <h2 class="slide-title">Giải Quyết Điểm Nghẽn Hiệu Năng (Bottlenecks)</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Điểm nghẽn #1 & #3: Tần suất OCR chạy liên tục ở mỗi frame gây lãng phí GPU</strong>
+                                <ul>
+                                    <li><i>Vấn đề:</i> Ngay cả khi biển số đã nhận dạng xong và khóa kết quả, SGIE3 vẫn chạy inference OCR ở các frame tiếp theo.</li>
+                                    <li><i>Giải pháp:</i> Cơ chế **Dynamic OCR Throttling** trong <code>sgie3.py</code>. </li>
+                                    <li><i>Cách làm:</i> Khi đối tượng nằm trong danh sách <code>locked_plate_ids</code>, probe sẽ đổi tạm thời <code>class_id</code> của object từ 13 sang 99 ở các frame trung gian. Do SGIE3 chỉ xử lý class 13, nó sẽ tự động bỏ qua đối tượng này.</li>
+                                    <li><i>Hiệu quả:</i> Giảm hơn **80%** tải suy luận OCR trên GPU mà vẫn giữ vết bám đuổi của tracker.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Điểm nghẽn ở dslaplacian: Tiêu tốn CPU tìm contour góc xoay</strong>
+                                <ul>
+                                    <li><i>Vấn đề:</i> Xử lý tìm contour trên ảnh crop phóng to tốn tài nguyên CPU.</li>
+                                    <li><i>Giải pháp:</i> Dò góc trên vùng ảnh crop nhỏ kèm 30% padding ở độ phân giải gốc (Native Resolution), không qua nội suy resize. Giúp giảm tải CPU và bảo toàn độ nét thực.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-gauge-high"></i> Giải pháp Dynamic Throttling</div>
+                        <div class="visual-canvas">
+                            <div class="mermaid" id="diagram-slide13">
+                                graph TD
+                                    Frame[Bắt đầu Frame mới] --> Probe[sgie3.py Probe]
+                                    Probe --> Check{ID đã nằm trong locked_plate_ids?}
+                                    Check -->|Có| CheckFrame{Đúng frame chu kỳ N?}
+                                    Check -->|Không| Infer[Giữ class_id=13 -> Chạy OCR]
+                                    CheckFrame -->|Có| Infer
+                                    CheckFrame -->|Không| Throttle[Đổi class_id=99 -> Bypass OCR]
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 15 -->
+            <div class="slide" data-category="TỐI ƯU HÓA HIỆU NĂNG" data-title="Slide 15: Kết Quả Đánh Giá Hiệu Năng & Độ Chính Xác">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 4: Tối ưu hóa hiệu năng & kết quả thực tế</span>
+                    <h2 class="slide-title">Kết Quả Đánh Giá Hiệu Năng & Độ Chính Xác</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Số lượng nhận diện thành công vượt trội:</strong>
+                                <ul>
+                                    <li>Tổng số sự kiện phát ra tăng **+29%** (169 events so với 131 của LPRNet) trên bộ dữ liệu test 15 video mẫu.</li>
+                                    <li>Tỷ lệ định dạng đúng cấu trúc Việt Nam đạt **100%**.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Khắc phục triệt để lỗi của mô hình cũ:</strong>
+                                <ul>
+                                    <li>Giải quyết hoàn toàn lỗi tự động chèn số <code>0</code> thừa vào cuối biển số của LPRNet (ví dụ: LPRNet ra <code>29C10052</code> thay vì <code>29C1052</code>).</li>
+                                    <li>Số lượng biển số 9 ký tự sai lệch giảm từ 10.7% về **0%**.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Tốc độ xử lý trong môi trường Production:</strong>
+                                <ul>
+                                    <li>Chạy ở chế độ tắt đồng bộ hiển thị (<code>sync=false</code>): đạt throughput cực cao **~384 FPS** cho 1 nguồn video.</li>
+                                    <li>Tốc độ xử lý nhanh gấp **~12.8 lần** thời gian thực của video đầu vào.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-chart-simple"></i> Số liệu đánh giá thực tế</div>
+                        <div class="box-container" style="margin-top: 10px;">
+                            <div class="g-card highlighted">
+                                <h4>Events phát ra</h4>
+                                <p>169</p>
+                                <span class="unit">LPRNet chỉ đạt 131 (+29%)</span>
+                            </div>
+                            <div class="g-card highlighted">
+                                <h4>Tỷ lệ biển 9 ký tự lỗi</h4>
+                                <p>0 %</p>
+                                <span class="unit">LPRNet lỗi 10.7%</span>
+                            </div>
+                            <div class="g-card highlighted">
+                                <h4>Tốc độ xử lý</h4>
+                                <p>~384 FPS</p>
+                                <span class="unit">Chế độ Production sync=false</span>
+                            </div>
+                            <div class="g-card highlighted">
+                                <h4>Tỉ lệ so với realtime</h4>
+                                <p>~12.8 ×</p>
+                                <span class="unit">Nhanh hơn thời gian thực</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Slide 16 -->
+            <div class="slide" data-category="TỔNG KẾT" data-title="Slide 16: Kết Luận & Hướng Phát Triển">
+                <div class="slide-header">
+                    <span class="slide-tag">Phần 4: Tối ưu hóa hiệu năng & kết quả thực tế</span>
+                    <h2 class="slide-title">Kết Luận & Hướng Phát Triển Tương Lai</h2>
+                </div>
+                <div class="slide-body">
+                    <div class="content-col">
+                        <ul class="bullet-list">
+                            <li><strong>Những thành tựu chính đã đạt được:</strong>
+                                <ul>
+                                    <li>Xây dựng thành công pipeline LPR real-time end-to-end trên GPU đạt throughput cao (>380 FPS) và độ trễ cực thấp.</li>
+                                    <li>Custom plugin <code>dslaplacian</code> với thuật toán định vị ký tự giải quyết triệt để vấn đề rò rỉ cản xe (Bumper Leakage) và mờ ảnh do resize.</li>
+                                    <li>Tầng lọc sơ bộ và cơ chế Throttling động giúp tối ưu hóa phần cứng, tiết kiệm tài nguyên GPU.</li>
+                                    <li>Nâng cấp lên mô hình New OCR 2024 loại bỏ hoàn toàn các lỗi sai lệch ký tự của LPRNet cũ.</li>
+                                </ul>
+                            </li>
+                            <li><strong>Định hướng nghiên cứu & phát triển tiếp theo:</strong>
+                                <ul>
+                                    <li>Mở rộng thử nghiệm khả năng chịu tải trên hệ thống đồng thời 32+ luồng camera RTSP.</li>
+                                    <li>Hoàn thiện và đồng bộ hóa dữ liệu sự kiện gửi về Dashboard máy chủ Edge Event Monitoring Server thông qua Kafka và MinIO.</li>
+                                    <li>Nghiên cứu tích hợp mô hình OCR end-to-end trực tiếp trên YOLOv11/YOLOv12 khi có tài nguyên phần cứng tốt hơn.</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="visual-col">
+                        <div class="visual-label"><i class="fa-solid fa-map-location-dot"></i> Lộ trình phát triển công nghệ</div>
+                        <div class="visual-canvas" style="display: flex; flex-direction: column; justify-content: space-around; width: 100%; height: 80%;">
+                            <div style="display: flex; align-items: center; gap: 16px; width: 100%;">
+                                <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid var(--accent-primary); width: 44px; height: 44px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: var(--accent-primary); flex-shrink: 0;"><i class="fa-solid fa-video"></i></div>
+                                <div>
+                                    <h4 style="font-size: 0.9rem; color: #FFFFFF;">Mở rộng quy mô Đa camera</h4>
+                                    <p style="font-size: 0.75rem; color: var(--text-muted);">Tối ưu hóa pipeline xử lý song song 32+ luồng RTSP camera cùng lúc.</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 16px; width: 100%;">
+                                <div style="background: rgba(6, 182, 212, 0.1); border: 1px solid var(--accent-secondary); width: 44px; height: 44px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: var(--accent-secondary); flex-shrink: 0;"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                                <div>
+                                    <h4 style="font-size: 0.9rem; color: #FFFFFF;">Tích hợp Edge-to-Cloud</h4>
+                                    <p style="font-size: 0.75rem; color: var(--text-muted);">Đồng bộ dữ liệu thời gian thực gửi về Dashboard tập trung qua Kafka.</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 16px; width: 100%;">
+                                <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid #F59E0B; width: 44px; height: 44px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: #F59E0B; flex-shrink: 0;"><i class="fa-solid fa-brain"></i></div>
+                                <div>
+                                    <h4 style="font-size: 0.9rem; color: #FFFFFF;">Tích hợp End-to-End AI OCR</h4>
+                                    <p style="font-size: 0.75rem; color: var(--text-muted);">Nghiên cứu mô hình nhận diện chữ trực tiếp trên YOLOv11/YOLOv12.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Collapsible Notes Panel -->
+        <div class="notes-panel" id="notesPanel">
+            <div class="notes-header">
+                <h3><i class="fa-solid fa-clipboard-user"></i> Diễn giải thuyết trình (Speaker Notes)</h3>
+                <button class="btn-util" onclick="toggleNotes()" style="padding: 2px 8px; font-size: 0.7rem;"><i class="fa-solid fa-xmark"></i> Đóng</button>
+            </div>
+            <div class="notes-body" id="notesBody">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+
+        <!-- Control Bar -->
+        <div class="control-bar">
+            <div class="navigation-controls">
+                <button class="btn-nav" id="btnPrev" onclick="prevSlide()" disabled><i class="fa-solid fa-arrow-left"></i> Trước</button>
+                <button class="btn-nav" id="btnNext" onclick="nextSlide()">Sau <i class="fa-solid fa-arrow-right"></i></button>
+                <span class="progress-indicator" id="progressIndicator">1 / 15</span>
+            </div>
+            <div class="utility-controls">
+                <button class="btn-util" id="btnNotes" onclick="toggleNotes()"><i class="fa-solid fa-clipboard-question"></i> Ghi chú (S)</button>
+                <button class="btn-util" onclick="window.print()"><i class="fa-solid fa-file-pdf"></i> In / Xuất PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Slides data containing Speaker Notes
+        const speakerNotes = [
+            `Chào buổi sáng mọi người. Hôm nay tôi xin trình bày về Hệ thống Nhận diện Biển số xe (LPR) Real-time hiệu năng cao được phát triển trên nền tảng NVIDIA DeepStream SDK. Mục tiêu của dự án là xây dựng một pipeline phân tích video thông minh, có khả năng xử lý đồng thời hàng chục luồng camera độ phân giải cao với độ trễ tối thiểu và độ chính xác vượt trội. Điểm đặc biệt của hệ thống này là toàn bộ quá trình từ giải mã video, phát hiện đối tượng, căn chỉnh biển số, đo độ nét cho đến nhận diện OCR đều được thực hiện trực tiếp trên bộ nhớ GPU (VRAM) với cơ chế Zero-copy, mang lại hiệu năng xử lý cực kỳ ấn tượng.`,
+            
+            `Nhìn vào sơ đồ kiến trúc pipeline, luồng dữ liệu bắt đầu từ uridecodebin, nơi video từ RTSP hoặc File được giải mã bằng phần cứng qua NVIDIA NVDEC, đưa thẳng vào bộ nhớ NVMM (NV12 format). Tiếp theo, nvstreammux đồng bộ hóa và gộp các frame của nhiều nguồn thành một batch duy nhất ở độ phân giải Full HD. Batch này được đưa qua PGIE chạy YOLOv11s để phát hiện phương tiện và biển số. Ngay sau đó, một Python Probe lọc bớt các đối tượng quá nhỏ hoặc không liên quan trước khi đưa vào nvtracker sử dụng thuật toán NvDCF để gán Object ID. Custom plugin dslaplacian tiếp tục đo độ nét biển số trực tiếp trên VRAM. Cuối cùng, SGIE3 thực hiện OCR và kết quả được giải mã CTC, tổng hợp sự kiện tại Metadata Probe trước khi đưa ra màn hình hiển thị hoặc gửi lên Kafka.`,
+            
+            `Sơ đồ này mô tả chi tiết quy trình xử lý của một khung hình đơn lẻ đi qua toàn bộ pipeline GStreamer. Bắt đầu từ khi nhận frame dạng NVMM batch từ nvstreammux, khung hình được đưa qua PGIE để phát hiện đối tượng, lọc bớt các lớp rác và xe quá nhỏ thông qua PGIE Probe, sau đó được theo dõi bởi nvtracker. Tiếp theo, custom plugin dslaplacian của chúng ta tính toán độ nét Laplacian và ghi kết quả vào metadata của đối tượng. Tại cổng vào của OCR, một SGIE3 Sink Probe khác ghi nhận tọa độ các biển số chưa khóa để cấp cho nvinfer SGIE3 chạy nhận dạng. Sau khi chạy suy luận OCR, khung hình được convert sang RGBA để Metadata Probe chạy song song trên Python. Đây là khâu xử lý nặng nhất của hệ thống, bao gồm các logic lọc trùng, liên kết hình học giữa xe và biển số, giải mã CTC, sửa lỗi chính tả Việt Nam, bầu chọn kết quả ổn định và phát sự kiện lên Kafka.`,
+            
+            `Ở khâu PGIE, chúng tôi sử dụng mô hình YOLOv11s được tối ưu hóa sang TensorRT FP16 chạy trên batch size động tương ứng với số lượng nguồn vào. YOLOv11s phát hiện 14 class đối tượng bao gồm nhiều loại phương tiện, con người và biển số xe. Tuy nhiên, nếu đưa trực tiếp toàn bộ kết quả này vào Tracker, hệ thống sẽ bị quá tải bộ nhớ do phải theo dõi hàng trăm đối tượng không cần thiết. Vì vậy, chúng tôi thiết kế một Python Probe ngay sau PGIE để lọc. Chúng tôi loại bỏ toàn bộ người đi bộ, xe đạp, và áp dụng bộ lọc kích thước động theo tỷ lệ khung hình. Nếu một chiếc xe có kích thước nhỏ hơn 60x40 pixel trên khung hình Full HD, nó sẽ bị drop ngay lập tức. Điều này giúp hệ thống chỉ tập trung vào các xe ở cự ly đủ gần để có thể đọc được biển số, giảm thiểu đáng kể số lượng track ID rác.`,
+            
+            `Để theo dõi chuyển động và định danh phương tiện, chúng tôi tích hợp nvtracker sử dụng thư viện NvDCF của NVIDIA. Cấu hình tracker được tối ưu hóa với độ phân giải đầu vào là 640x384 và tắt tính năng Re-ID để tăng tốc độ xử lý. Vai trò của tracker cực kỳ quan trọng: nó gán một object_id duy nhất và ổn định cho chiếc xe và biển số của nó suốt quá trình di chuyển trong góc nhìn camera. Mọi dữ liệu lịch sử nhận dạng của xe này sẽ được lưu trữ trong một cấu trúc dữ liệu gọi là VehicleTrackState được tra cứu theo cặp khóa (source_id, object_id). Khi tracker duy trì được ID ổn định, thuật toán voting của chúng tôi mới hoạt động hiệu quả để đưa ra kết quả cuối cùng chính xác nhất.`,
+            
+            `Một trong những đột phá lớn nhất của dự án là việc tự phát triển Custom GStreamer Plugin mang tên dslaplacian. Thông thường, nếu gửi tất cả biển số phát hiện được đi nhận dạng OCR, GPU sẽ bị quá tải bởi các biển số mờ, nhòe do xe ở quá xa hoặc chuyển động nhanh. Plugin này hoạt động như một bộ lọc phần cứng để đo độ sắc nét của biển số trước khi chạy OCR. Để tối ưu hóa hiệu năng, chúng tôi áp dụng kiến trúc Hybrid tận dụng cả CPU và GPU thông qua Unified Memory (cudaMallocManaged). GPU thực hiện việc cắt vùng biển số và đưa vào vùng nhớ chung. CPU đọc trực tiếp vùng nhớ này để tìm góc xoay biển số mà không cần copy dữ liệu qua PCIe. Sau đó, GPU dùng ma trận xoay đó để nắn thẳng ảnh và tính toán độ sắc nét.`,
+            
+            `Khi thiết kế thuật toán căn chỉnh biển số, chúng tôi gặp phải hai vấn đề rất lớn trong thực tế. Thứ nhất là hiện tượng 'Bumper Leakage'. Khi biển số xe nằm sát cản sau hoặc cản trước của xe (nhất là xe tải hoặc xe màu trắng/đen sáng bóng), các thuật toán dò cạnh truyền thống như Otsu hay Canny viền ngoài sẽ bị đánh lừa. Chúng kết nối viền cản xe vào biển số, tạo ra một hình đa giác méo mó. Kết quả là ảnh crop bị cắt lệch, mất chữ số. Thứ hai, nếu chúng ta phóng to biển số nhỏ ở cự ly xa trước khi tính độ nét, thuật toán nội suy của máy tính sẽ tự động làm mịn ảnh. Điều này làm mất đi độ sắc nét thực và khiến điểm số Laplacian bị sai lệch. Do đó, chúng ta cần một giải pháp xử lý ở độ phân giải gốc và tập trung vào lõi ký tự.`,
+            
+            `Giải pháp đột phá của chúng tôi là thuật toán 'Định vị ký tự' (char_est). Thay vì tìm viền biển số xe vốn rất dễ bị nhiễu do cản xe, chúng tôi đi tìm các ký tự bên trong biển số. Chúng tôi sử dụng phân ngưỡng thích ứng cục bộ để tách biệt các chữ số. Tiếp theo, các contour chữ số được lọc qua một bộ heuristic nghiêm ngặt về chiều cao, chiều rộng và độ đặc để loại bỏ nhiễu. Khi đã xác định được ít nhất 2 chữ số, chúng tôi gom tọa độ của chúng lại và vẽ một hộp bao nghiêng tối thiểu minAreaRect. Hộp bao này sẽ phản ánh chính xác 100% góc nghiêng của biển số. Cuối cùng, dựa trên tỷ lệ khung hình của lõi chữ để biết đó là biển dài hay biển vuông, chúng tôi nhân với hệ số giãn nở tương ứng để khôi phục lại 4 góc của biển số thật. Cách tiếp cận này hoàn toàn miễn nhiễm với hiện tượng bumper leakage.`,
+            
+            `Trong môi trường camera thực tế, sẽ có những lúc biển số bị che khuất một phần, hoặc trời quá tối khiến không thể tìm đủ 2 ký tự để chạy thuật toán char_est. Để hệ thống hoạt động ổn định 100% mà không bị crash, chúng tôi thiết kế một Cơ chế Dự phòng Đa tầng gồm 5 cấp độ quyết định. Nếu Cấp 1 (char_est) thất bại, hệ thống tự động chuyển sang Cấp 2 sử dụng phân ngưỡng Otsu viền ngoài. Nếu vẫn không được, hệ thống hạ xuống Cấp 3 sử dụng dò cạnh Canny. Cấp 4 sẽ gom toàn bộ pixel Canny để vẽ hộp bao nghiêng. Và nếu mọi nỗ lực tìm góc xoay đều thất bại, hệ thống sẽ sử dụng Cấp 5 là scale tĩnh không xoay dựa trên bbox ban đầu của PGIE. Kết quả là pipeline luôn có ảnh đầu ra tốt nhất có thể để gửi cho mô hình OCR.`,
+            
+            `Để tối đa hóa tốc độ xử lý trên GPU, chúng tôi không sử dụng các hàm OpenCV chạy tuần tự trên GPU vì việc gọi nhiều kernel sẽ gây nghẽn băng thông bộ nhớ VRAM. Thay vào đó, chúng tôi viết lại thành các Fused Kernel (kernel gộp). Ở Kernel thứ nhất, chúng tôi vừa Warp Perspective vừa tìm giá trị pixel Min/Max bằng các hàm atomic của CUDA. Ở Kernel thứ hai, chúng tôi gộp ba bước: Contrast Stretching, Gaussian Blur 3x3 và tính toán Laplacian Variance vào chung một mã nguồn chạy song song trên GPU. Vì kích thước vùng ảnh biển số rất nhỏ (chỉ khoảng 7.5 Kilobyte), toàn bộ quá trình tính toán này được GPU thực hiện trên bộ nhớ cache L1 cực nhanh, giúp tiết kiệm băng thông VRAM và đẩy tốc độ xử lý lên mức tối đa.`,
+            
+            `Trong phiên bản này, chúng tôi đã loại bỏ hoàn toàn mô hình LPRNet cũ và thay thế bằng mô hình New OCR 2024. Mô hình này nhận đầu vào kích thước 64x128 pixel định dạng BGR và xuất ra tensor phân phối xác suất trên vocab 37 class. Điểm cải tiến vượt bậc là khả năng xử lý biển vuông trực tiếp. Trước đây với LPRNet, chúng ta phải viết code rất phức tạp để cắt biển vuông làm đôi thành hai ảnh dòng trên và dòng dưới riêng biệt rồi mới chạy OCR. Với mô hình mới, nó được train để nhận diện cả biển vuông và tự động trả về ký tự gạch dưới '_' ở giữa hai dòng. Điều này giúp chúng ta lược bỏ được toàn bộ logic phân tách dòng phức tạp, làm pipeline chạy mượt mà và tin cậy hơn nhiều.`,
+            
+            `Sau khi có tensor đầu ra từ mô hình OCR, chúng tôi áp dụng thuật toán Greedy CTC Decode ngay trong Python Probe bằng ctypes để đọc trực tiếp từ GPU memory. CTC decode giúp gộp các ký tự lặp và loại bỏ các blank token để tạo ra chuỗi văn bản thô. Từ chuỗi thô này, chúng tôi chuyển qua bộ lọc chuẩn hóa chuyên biệt cho biển số Việt Nam. Do cấu trúc biển số Việt Nam có quy luật rất chặt chẽ, chúng tôi viết thuật toán để tự động phát hiện và sửa các ký tự hay bị nhận diện nhầm ở từng vị trí cụ thể. Ví dụ, nếu OCR đọc chữ 'O' hoặc chữ 'D' ở vị trí mã tỉnh (vốn bắt buộc phải là số), hệ thống sẽ tự động sửa thành số '0'. Sau khi sửa sai, chuỗi ký tự được chấm điểm định dạng. Chỉ các chuỗi đạt điểm định dạng cơ bản lớn hơn 5.0 mới được chấp nhận đưa vào khâu tiếp theo.`,
+            
+            `Để đưa ra kết quả cuối cùng có độ tin cậy cao nhất, chúng tôi áp dụng cơ chế Quản lý Trạng thái và Bầu chọn thông minh. Với mỗi xe được tracker bám đuổi, chúng tôi duy trì một sliding window lưu trữ tối đa 30 kết quả đọc OCR gần nhất. Chúng tôi gom cụm các chuỗi ký tự có khoảng cách chỉnh sửa Levenshtein nhỏ hơn hoặc bằng 1 để loại bỏ các lỗi chính tả ngẫu nhiên của OCR. Khi một cụm đạt tối thiểu 3 lượt vote đồng thuận và điểm chất lượng vượt qua 4.0, hệ thống sẽ tiến hành 'Khóa' biển số. Tuy nhiên, khóa không có nghĩa là ngừng cập nhật. Khi xe tiến lại gần camera, ảnh nét hơn, điểm số chất lượng tăng lên, hệ thống vẫn cho phép ghi đè kết quả cũ nếu kết quả mới có chất lượng vượt trội. Cuối cùng, cơ chế chống trùng lặp (Anti-spam) đảm bảo mỗi chiếc xe đi qua chỉ phát duy nhất một sự kiện JSON kèm ảnh crop của xe và biển số lên hệ thống Kafka hoặc MinIO.`,
+            
+            `Trong quá trình vận hành thử nghiệm, chúng tôi phát hiện hai điểm nghẽn hiệu năng lớn. Điểm nghẽn thứ nhất là mô hình OCR của SGIE3 chạy suy luận liên tục trên mọi biển số ở mỗi frame, ngay cả khi biển số đó đã được nhận diện cực kỳ rõ nét và đã được khóa kết quả. Điều này gây lãng phí tài nguyên GPU khủng khiếp. Chúng tôi đã xử lý triệt để bằng cách lập trình cơ chế Dynamic OCR Throttling trong probe SGIE3. Khi một biển số đã khóa, chúng tôi đổi class ID của nó từ 13 sang 99 ở các frame trung gian. Vì SGIE3 chỉ được cấu hình để nhận diện class 13, nó sẽ tự động bỏ qua các biển số này. Giải pháp này giúp cắt giảm hơn 80% tải GPU cho tầng OCR. Ở điểm nghẽn thứ hai, chúng tôi chuyển thuật toán tìm contour về vùng ảnh crop cực nhỏ ở độ phân giải gốc, giúp CPU xử lý nhanh hơn và loại bỏ hoàn toàn hiện tượng mờ răng cưa do resize.`,
+            
+            `Để minh chứng cho hiệu quả của hệ thống mới, chúng tôi đã tiến hành benchmark chi tiết trên bộ dữ liệu gồm 15 video thực tế từ các camera giám sát giao thông. Kết quả cho thấy mô hình New OCR 2024 kết hợp với bộ lọc chuẩn hóa mới đã giúp số lượng sự kiện nhận diện thành công tăng thêm 29%, đạt 169 sự kiện so với 131 sự kiện của mô hình LPRNet cũ. Điểm mấu chốt là chúng tôi đã giải quyết triệt để lỗi thêm số 0 thừa rất khó chịu của LPRNet. Tỷ lệ biển số dài 9 ký tự sai lệch hoàn toàn bị triệt tiêu về 0%. Về mặt hiệu năng, ở chế độ chạy sản xuất thực tế, hệ thống đạt tốc độ xử lý lên đến 384 khung hình trên giây cho mỗi luồng, tương đương với việc xử lý nhanh gấp gần 13 lần tốc độ thực tế của video đầu vào, cho thấy khả năng mở rộng quy mô (scaling) rất lớn.`,
+            
+            `Để kết luận, dự án đã hoàn thành xuất sắc các mục tiêu đề ra. Chúng tôi đã xây dựng được một pipeline nhận diện biển số xe hoạt động cực kỳ ổn định, chính xác và hiệu năng cao trên nền tảng NVIDIA DeepStream. Thuật toán định vị ký tự tự phát triển đã chứng minh được tính hiệu quả vượt trội so với các giải pháp xử lý ảnh truyền thống, loại bỏ hoàn toàn các lỗi mất góc do cản xe. Trong thời gian tới, chúng tôi sẽ tập trung vào việc tối ưu hóa pipeline để chạy đồng thời trên 32 luồng camera RTSP độ phân giải cao trên một thiết bị Edge duy nhất. Đồng thời, chúng tôi sẽ hoàn thiện hệ thống truyền nhận sự kiện thời gian thực qua Kafka về Dashboard máy chủ giám sát tập trung. Xin cảm ơn mọi người đã lắng nghe, tôi rất sẵn lòng trả lời các câu hỏi.`
+        ];
+
+        let currentSlideIdx = 0;
+        const slides = document.querySelectorAll('.slide');
+        const sidebarMenu = document.getElementById('sidebarMenu');
+        const progressIndicator = document.getElementById('progressIndicator');
+        const btnPrev = document.getElementById('btnPrev');
+        const btnNext = document.getElementById('btnNext');
+        const notesPanel = document.getElementById('notesPanel');
+        const notesBody = document.getElementById('notesBody');
+        const btnNotes = document.getElementById('btnNotes');
+
+        // Build sidebar navigation menu items dynamically
+        function initSidebar() {
+            sidebarMenu.innerHTML = '';
+            slides.forEach((slide, idx) => {
+                const title = slide.getAttribute('data-title');
+                const cat = slide.getAttribute('data-category');
+                
+                const li = document.createElement('li');
+                li.className = `menu-item ${idx === currentSlideIdx ? 'active' : ''}`;
+                li.onclick = () => goToSlide(idx);
+                
+                const numSpan = document.createElement('span');
+                numSpan.className = 'slide-num';
+                numSpan.innerText = `${idx + 1}`;
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.innerText = title.replace(`Slide ${idx + 1}: `, '');
+                
+                li.appendChild(numSpan);
+                li.appendChild(titleSpan);
+                sidebarMenu.appendChild(li);
+            });
+        }
+
+        // Navigate to a specific slide index
+        function goToSlide(idx) {
+            if (idx < 0 || idx >= slides.length) return;
+            
+            // Update active state in DOM
+            slides[currentSlideIdx].classList.remove('active');
+            slides[currentSlideIdx].classList.remove('fade-in');
+            
+            currentSlideIdx = idx;
+            
+            slides[currentSlideIdx].classList.add('active');
+            slides[currentSlideIdx].classList.add('fade-in');
+            
+            // Update Sidebar active item
+            const menuItems = sidebarMenu.querySelectorAll('.menu-item');
+            menuItems.forEach((item, mIdx) => {
+                if (mIdx === currentSlideIdx) {
+                    item.classList.add('active');
+                    item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+
+            // Update bottom bar progress & button disabled states
+            progressIndicator.innerText = `${currentSlideIdx + 1} / ${slides.length}`;
+            btnPrev.disabled = currentSlideIdx === 0;
+            btnNext.disabled = currentSlideIdx === slides.length - 1;
+
+            // Load speaker notes
+            notesBody.innerText = speakerNotes[currentSlideIdx];
+
+            // Render Mermaid diagrams dynamically when slide is shown
+            setTimeout(() => {
+                const activeSlide = slides[currentSlideIdx];
+                const mermaidDiv = activeSlide.querySelector('.mermaid');
+                if (mermaidDiv && !mermaidDiv.getAttribute('data-processed')) {
+                    mermaid.run({
+                        nodes: [mermaidDiv]
+                    });
+                }
+            }, 50);
+        }
+
+        function nextSlide() {
+            if (currentSlideIdx < slides.length - 1) {
+                goToSlide(currentSlideIdx + 1);
+            }
+        }
+
+        function prevSlide() {
+            if (currentSlideIdx > 0) {
+                goToSlide(currentSlideIdx - 1);
+            }
+        }
+
+        function toggleNotes() {
+            notesPanel.classList.toggle('active');
+            btnNotes.classList.toggle('active');
+            
+            // Store preference in localStorage
+            localStorage.setItem('showNotes', notesPanel.classList.contains('active'));
+        }
+
+        // Initial settings
+        initSidebar();
+        goToSlide(0);
+
+        // Load notes preference
+        if (localStorage.getItem('showNotes') === 'true') {
+            toggleNotes();
+        }
+
+        // Keyboard Navigation Controls
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+                e.preventDefault();
+                nextSlide();
+            } else if (e.key === 'ArrowLeft' || e.key === 'Backspace' || e.key === 'PageUp') {
+                e.preventDefault();
+                prevSlide();
+            } else if (e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                toggleNotes();
+            }
+        });
+    </script>
+</body>
+</html>

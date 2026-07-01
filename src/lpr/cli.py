@@ -10,7 +10,6 @@ def _parse_args(args):
     debug_jsonl  = None
     event_output_dir = None
     event_jsonl = None
-    event_cooldown_frames = 60
     min_stable_votes = 2
     save_event_frame = False
     pgie_interval = 0
@@ -143,10 +142,6 @@ def _parse_args(args):
             event_jsonl = _nextval()
         elif a.startswith("--event-jsonl="):
             event_jsonl = a.split("=", 1)[1]
-        elif a == "--event-cooldown-frames":
-            event_cooldown_frames = int(_nextval())
-        elif a.startswith("--event-cooldown-frames="):
-            event_cooldown_frames = int(a.split("=", 1)[1])
         elif a == "--min-stable-votes":
             min_stable_votes = int(_nextval())
         elif a.startswith("--min-stable-votes="):
@@ -196,7 +191,6 @@ def _parse_args(args):
         debug_jsonl=debug_jsonl,
         event_output_dir=event_output_dir,
         event_jsonl=event_jsonl,
-        event_cooldown_frames=event_cooldown_frames,
         min_stable_votes=min_stable_votes,
         save_event_frame=save_event_frame,
         pgie_interval=pgie_interval,

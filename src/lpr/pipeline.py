@@ -64,6 +64,7 @@ def run(args, *, probe_overrides=None, ocr_backend=None):
     state.object_last_seen  = {}
     state.plate_text_seen   = {}
     state.emitted_event_keys = set()
+    state.locked_plate_ids  = set()
     state.debug_jsonl_path  = None
     state.source_uri_by_id  = {}
     state.save_event_frame  = False
@@ -115,7 +116,6 @@ def run(args, *, probe_overrides=None, ocr_backend=None):
 
     state.event_output_dir = os.path.abspath(cfg["event_output_dir"]) if cfg["event_output_dir"] else None
     state.event_jsonl_path = os.path.abspath(cfg["event_jsonl"]) if cfg["event_jsonl"] else None
-    state.event_cooldown_frames = cfg["event_cooldown_frames"]
     state.save_event_frame = cfg["save_event_frame"]
     state.emit_duplicates = cfg["emit_duplicates"]
     state.event_repeat_cooldown_frames = cfg["event_repeat_cooldown_frames"]
@@ -173,7 +173,6 @@ def run(args, *, probe_overrides=None, ocr_backend=None):
             "  --event-output-dir <dir>  write final event media to dir\n"
             "  --event-jsonl <path>  write server-ready events.jsonl\n"
             "  --save-event-frame  save original source frame for accepted events\n"
-            "  --event-cooldown-frames <N>  min frames before emitting (default: 60)\n"
             "  --min-stable-votes <N>  require N votes for stability (default: 2)\n"
             "  --pgie-interval <N>  PGIE frame skip override (default: 0)\n"
             "  --min-plate-conf <f>  skip low-confidence plates (default: 0.05)\n"

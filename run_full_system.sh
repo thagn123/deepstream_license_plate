@@ -36,6 +36,7 @@ echo "====================================================="
 cd "$WORKSPACE_DIR/web_server_kafka"
 nohup python3 forward_jsonl_to_web.py \
     --events-jsonl /home/thagn/projects/deepstream/outputs/events/events.jsonl \
+    --host http://localhost:8001 \
     --path-map "/outputs=/home/thagn/projects/deepstream/outputs" > forwarder.log 2>&1 &
 FORWARDER_PID=$!
 
@@ -58,7 +59,7 @@ echo "Nhấn Ctrl+C ở terminal này để dừng toàn bộ hệ thống."
 # Cài đặt trap để khi bạn nhấn Ctrl+C, script sẽ tự động kill các tiến trình ngầm
 trap "echo -e '\n[INFO] Đang đóng hệ thống...'; kill $FORWARDER_PID $MONITOR_PID 2>/dev/null; exit 0" SIGINT SIGTERM
 
-# Khởi chạy bằng ximagesink hiển thị trực tiếp lên màn hình của Host (yêu cầu chạy xhost +local:docker ngoài máy host)
+# ximagesink hiển thị trực tiếp lên màn hình Host (yêu cầu: xhost +local:docker trên host)
 docker exec -w /workspace/last_ds_cp ds90 \
     env DISPLAY=:0 USE_XIMAGESINK=1 \
     python3 /workspace/last_ds_cp/src/app_lpr_v2.py \

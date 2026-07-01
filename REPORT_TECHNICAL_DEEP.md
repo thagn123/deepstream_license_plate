@@ -1900,3 +1900,289 @@ GIẢI PHÁP char_est:
 ---
 
 *Báo cáo này tổng hợp từ: phân tích source code trực tiếp, đo lường thực nghiệm trên 15 video, và kết quả từ REPORT.md + REPORT_CUSTOM_PLUGIN.md. Mọi số liệu phản ánh trạng thái hệ thống tại 2026-06-26. Model LPRNet đã được loại bỏ hoàn toàn, hệ thống chỉ dùng New OCR 2024.*
+
+---
+
+## Phụ Lục C — Kiểm tra pipeline & Danh sách cải tiến (2026-06-29)
+
+Sau đợt review toàn bộ source code, 8 vấn đề được xác định và đã được fix trong cùng một commit. Mục này ghi lại chi tiết từng vấn đề, nguyên nhân gốc rễ, và thay đổi thực hiện.
+
+---
+
+### C.1. Memory leak: `locked_plate_ids` không được dọn
+
+**Mức độ:** 🔴 Nghiêm trọng  
+**File:** `src/lpr/cleanup.py`, `src/lpr/state.py`, `src/lpr/pipeline.py`
+
+**Vấn đề:**
+
+```
+state.locked_plate_ids = set()   # chứa object_id của biển đã đọc xong
+
+cleanup.py → _cleanup_history() dọn:
+  ✓ vehicle_states, plate_history, ocr_frame_cache, ...
+  ✗ locked_plate_ids  ← KHÔNG bao giờ được dọn
+  ✗ pipeline.run()    ← KHÔNG reset khi chạy video mới
+```
+
+Object_id từ nvtracker là số tăng đơn điệu, không bao giờ lặp lại trong một session. Sau 8 giờ chạy trên đường đông, set có thể chứa hàng nghìn entry vô dụng (mỗi biển đã xử lý xong vẫn giữ ID mãi mãi).
+
+**Hậu quả thực tế:**
+
+- RAM tăng dần không giới hạn trong session 24/7
+- Pipeline chạy nhiều video liên tiếp (`run()` gọi nhiều lần): `locked_plate_ids` từ video N ảnh hưởng video N+1 nếu object_id trùng
+
+**Fix:**
+
+`cleanup.py` — thêm sau vòng dọn `stale_keys`:
+```python
+stale_oids = {oid for (_, oid) in stale_keys}
+state.locked_plate_ids -= stale_oids
+```
+
+`pipeline.py` — thêm vào khối reset đầu `run()`:
+```python
+state.locked_plate_ids = set()
+```
+
+---
+
+### C.2. Dead state: `plate_rects` được ghi nhưng không bao giờ đọc
+
+**Mức độ:** 🟡 Trung bình  
+**File:** `src/lpr/probes/sgie3.py`, `src/lpr/state.py`
+
+**Vấn đề:**
+
+```python
+# sgie3.py — ghi vào mỗi frame
+state.plate_rects[(sid, obj_meta.object_id)] = (r.left, r.top, r.width, r.height)
+
+# Không có dòng nào trong codebase đọc state.plate_rects
+# Dict này tăng vô hạn, không được cleanup.py dọn
+```
+
+`plate_rects` có thể là tàn dư của một thiết kế cũ (dùng bbox từ SGIE3 để cross-check). Chức năng này không được implement.
+
+**Fix:** Xóa hoàn toàn — `plate_rects = {}` khỏi `state.py`, block ghi khỏi `sgie3.py`.
+
+---
+
+### C.3. Dead variable: `event_cooldown_frames` không được dùng trong logic
+
+**Mức độ:** 🟡 Trung bình (gây nhầm lẫn khi cấu hình)  
+**File:** `src/lpr/state.py`, `src/lpr/cli.py`, `src/lpr/pipeline.py`
+
+**Vấn đề:**
+
+```
+CLI:      --event-cooldown-frames <N>   (parse, lưu vào cfg)
+pipeline: state.event_cooldown_frames = cfg["event_cooldown_frames"]
+state.py: event_cooldown_frames = 60   (default)
+
+Nhưng KHÔNG có dòng nào trong probe logic đọc biến này.
+```
+
+Logic dedup thực tế dùng `event_repeat_cooldown_frames` (khác tên). Người dùng đặt `--event-cooldown-frames=120` không có tác dụng gì, gây hiểu nhầm.
+
+**Fix:** Xóa hoàn toàn khỏi `state.py`, `cli.py` (parsing + return dict), `pipeline.py` (assignment + help text).
+
+---
+
+### C.4. Dead code: `_geometry_associate_plate` và `_resolve_vehicle_track_key`
+
+**Mức độ:** 🟢 Nhỏ  
+**File:** `src/lpr/association.py`
+
+**Vấn đề:**
+
+```python
+def _geometry_associate_plate(plate_bbox, vehicles):   # line 6  — không được gọi
+    ...
+
+def _resolve_vehicle_track_key(obj_meta, sid, vehicles):  # line 34 — không được gọi
+    ...
+    return _geometry_associate_plate(...)  # chỉ caller duy nhất của hàm trên
+```
+
+Grep toàn bộ codebase: không có file nào import hoặc gọi hai hàm này. Import `_bbox_iou` cũng là dead import do chỉ `_geometry_associate_plate` dùng.
+
+**Fix:** Xóa cả hai hàm và import `_bbox_iou` không dùng.
+
+---
+
+### C.5. `sort_corners` C++ sai với biển nghiêng
+
+**Mức độ:** 🔴 Nghiêm trọng (ảnh hưởng chất lượng warp)  
+**File:** `custom_plugins/ds_laplacian/gstlaplacian.cpp:129`
+
+**Vấn đề — thuật toán cũ:**
+
+```cpp
+// Sort theo x → tách "2 điểm trái" và "2 điểm phải"
+std::sort(pts.begin(), pts.end(), [](a, b){ return a.x < b.x; });
+cv::Point2f tl = pts[0].y < pts[1].y ? pts[0] : pts[1];
+cv::Point2f bl = pts[0].y < pts[1].y ? pts[1] : pts[0];
+cv::Point2f tr = pts[2].y < pts[3].y ? pts[2] : pts[3];
+cv::Point2f br = pts[2].y < pts[3].y ? pts[3] : pts[2];
+```
+
+Với biển nghiêng ~15°, 4 góc của `minAreaRect` KHÔNG chia đều theo trục x. Ví dụ với biển nghiêng phải:
+
+```
+        TR●──────────────●BR
+        /                  \
+      TL●──────────────●BL
+
+  x-sort: [TL, TR, BR, BL] (2 trái = TL+TR, 2 phải = BR+BL)
+  → sort nhầm TL↔TR và BR↔BL
+  → getPerspectiveTransform nhận điểm sai thứ tự → ảnh warp bị lật
+```
+
+**Thuật toán đúng (sum/diff — OpenCV convention):**
+
+```
+TL = argmin(x + y)   ← nhỏ nhất cả x lẫn y
+BR = argmax(x + y)   ← lớn nhất cả x lẫn y
+TR = argmax(x - y)   ← x lớn, y nhỏ
+BL = argmin(x - y)   ← x nhỏ, y lớn
+```
+
+**Fix:**
+
+```cpp
+static void sort_corners(std::vector<cv::Point2f>& pts)
+{
+    cv::Point2f tl = pts[0], tr = pts[0], br = pts[0], bl = pts[0];
+    float min_sum = 1e9f, max_sum = -1e9f, min_diff = 1e9f, max_diff = -1e9f;
+    for (const auto& p : pts) {
+        float s = p.x + p.y, d = p.x - p.y;
+        if (s < min_sum)  { min_sum  = s; tl = p; }
+        if (s > max_sum)  { max_sum  = s; br = p; }
+        if (d < min_diff) { min_diff = d; bl = p; }
+        if (d > max_diff) { max_diff = d; tr = p; }
+    }
+    pts = {tl, tr, br, bl};
+}
+```
+
+---
+
+### C.6. Coordinate mismatch khi padded bbox > 1000px
+
+**Mức độ:** 🟡 Trung bình (chỉ xảy ra khi biển rất to/camera rất gần)  
+**File:** `custom_plugins/ds_laplacian/gstlaplacian.cpp:544`
+
+**Vấn đề:**
+
+```cpp
+int copy_w = std::min(pw, 1000);   // crop clamped về 1000px tối đa
+int copy_h = std::min(ph, 500);
+
+gpu_crop_and_resize_to_cpu(..., copy_w, copy_h, cpu_detect_buf, copy_w, copy_h, ...);
+// → cpu_detect_buf chứa ảnh kích thước copy_w × copy_h
+
+find_plate_corners(cpu_in, Minv_ptr);
+// → Minv tính trong hệ tọa độ [0..copy_w] × [0..copy_h]
+
+gpu_warp_equalize_blur_laplacian(..., px, py, pw, ph, Minv_ptr, ...);
+//                                              ↑↑ SAI! Phải là copy_w, copy_h
+// Kernel dùng crop_w=pw để bound-check nhưng Minv ánh xạ trong [0..copy_w]
+// Khi pw > copy_w: kết quả warp tra cứu ngoài vùng đã detect corners
+```
+
+**Fix:** Truyền `copy_w, copy_h` thay vì `pw, ph` vào `gpu_warp_equalize_blur_laplacian_ctx`.
+
+---
+
+### C.7. Padding không nhất quán: C++ dùng 30%, Python test dùng 20%
+
+**Mức độ:** 🟢 Nhỏ  
+**File:** `custom_plugins/ds_laplacian/gstlaplacian.cpp:520`
+
+**Vấn đề:** `pad_x = cw * 0.30f` trong C++, nhưng prototype Python (`test_dslaplacian.py`) dùng 20%. Với 30%, vùng background xung quanh biển lớn hơn → adaptive threshold có thêm nhiễu từ nền xe.
+
+**Fix:** Thống nhất về 20%:
+```cpp
+int pad_x = std::max(8, (int)(cw * 0.20f));
+int pad_y = std::max(6, (int)(ch * 0.20f));
+```
+
+---
+
+### C.8. CUDA malloc/free trong hot path — bottleneck hiệu năng lớn nhất
+
+**Mức độ:** 🔴 Nghiêm trọng (hiệu năng)  
+**File:** `custom_plugins/ds_laplacian/laplacian_lib.cu`
+
+**Vấn đề — code cũ:**
+
+```cpp
+// Gọi mỗi lần cho mỗi biển số, mỗi frame:
+double gpu_warp_equalize_blur_laplacian(...) {
+    unsigned char* d_warped;  cudaMalloc(&d_warped, OUT_W * OUT_H);  // ← ĐẮT
+    float* d_m;               cudaMalloc(&d_m, 9 * sizeof(float));
+    float *d_sum, *d_sq_sum;  cudaMalloc(&d_sum, ...);
+    int *d_count, *d_min, *d_max; cudaMalloc(×3);
+    // ... 5× cudaMemcpyAsync, 2× kernel, 2× cudaStreamSynchronize ...
+    cudaFree(d_warped); cudaFree(d_m); cudaFree(×5);   // ← ĐẮT
+}
+```
+
+Với 5 biển/frame × 30 FPS = **150 lần `cudaMalloc` + 150 lần `cudaFree` mỗi giây**.  
+`cudaMalloc` có latency 10–100µs và phải lock CUDA memory manager → sequential bottleneck.
+
+Thêm vào đó: stream `0` (null stream) là default stream — `cudaStreamSynchronize(0)` chờ TẤT CẢ operations trên GPU (bao gồm cả PGIE/SGIE3 inference), thay vì chỉ chờ warp kernels.
+
+**Giải pháp — `LaplGpuCtx`:**
+
+```
+Phân bổ một lần tại plugin init:
+  LaplGpuCtx* ctx = lapl_gpu_ctx_create(OUT_W, OUT_H);
+    → cudaMalloc × 7 buffers + cudaStreamCreate × 1
+
+Mỗi frame chỉ cần:
+  cudaMemcpyAsync(ctx->d_m, Minv, ...)      ← 9 floats
+  cudaMemsetAsync(×4)                        ← reset accumulators
+  2× kernel launch + 2× cudaStreamSynchronize(ctx->stream)
+  3× cudaMemcpyAsync D→H                     ← kết quả
+
+Giải phóng tại plugin finalize:
+  lapl_gpu_ctx_destroy(ctx);
+```
+
+Dedicated `ctx->stream` tách biệt hoàn toàn với PGIE/SGIE3 inference streams — `cudaStreamSynchronize(ctx->stream)` chỉ chờ warp kernels, không block toàn bộ GPU.
+
+**Ước tính cải thiện:** từ ~150 cudaMalloc/s → 0 cudaMalloc/s trong hot path. Giảm latency mỗi biển khoảng 0.5–2ms, tổng 2.5–10ms/frame.
+
+**Thay đổi file:**
+
+| File | Thay đổi |
+|------|----------|
+| `laplacian_lib.h` | Thêm `LaplGpuCtx` opaque type, `lapl_gpu_ctx_create`, `lapl_gpu_ctx_destroy`, `gpu_warp_equalize_blur_laplacian_ctx` |
+| `laplacian_lib.cu` | Implement struct + create/destroy + ctx version (giữ nguyên kernels) |
+| `gstlaplacian.h` | Thêm field `void* gpu_ctx` vào `GstLaplacian` |
+| `gstlaplacian.cpp` | Init ctx trong `gst_laplacian_init`, free trong `gst_laplacian_finalize`, dùng `gpu_warp_equalize_blur_laplacian_ctx` trong `transform_ip` |
+
+---
+
+### C.9. Tổng kết thay đổi
+
+| # | Vấn đề | Loại | File thay đổi |
+|---|--------|------|--------------|
+| C.1 | `locked_plate_ids` memory leak | Bug | `cleanup.py`, `pipeline.py` |
+| C.2 | `plate_rects` dead state | Cleanup | `state.py`, `sgie3.py` |
+| C.3 | `event_cooldown_frames` dead variable | Cleanup | `state.py`, `cli.py`, `pipeline.py` |
+| C.4 | `_geometry_associate_plate` dead code | Cleanup | `association.py` |
+| C.5 | `sort_corners` sai với biển nghiêng | Bug | `gstlaplacian.cpp` |
+| C.6 | Coordinate mismatch khi pw > 1000 | Bug | `gstlaplacian.cpp` |
+| C.7 | Padding 30% vs 20% không nhất quán | Inconsistency | `gstlaplacian.cpp` |
+| C.8 | cudaMalloc per-frame + null stream | Performance | `laplacian_lib.h/.cu`, `gstlaplacian.h/.cpp` |
+
+Sau các thay đổi này, C++ plugin cần **rebuild**:
+
+```bash
+cd custom_plugins/ds_laplacian
+make clean && make
+sudo make install
+```
