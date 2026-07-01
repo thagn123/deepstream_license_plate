@@ -6,7 +6,7 @@ Một hệ thống tự động nhận diện biển số xe (ALPR) hiệu năng
 
 ## 🌟 Tính năng nổi bật
 
-1. **Hiệu năng Real-time vượt trội (>600 FPS):** 
+1. **Hiệu năng Real-time vượt trội :** 
    - Khả năng xử lý tốc độ cao trên phần cứng Edge/GPU với luồng video H.264 và RTSP.
    - Hỗ trợ xử lý đa luồng (Multi-stream) cùng lúc.
 
